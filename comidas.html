@@ -294,7 +294,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Cuernavaca';
+const BUILD_VERSION = 'Xalapa';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1191,8 +1191,12 @@ function convertirRecetaPegada(){
   if(p.porciones) document.getElementById('edPorciones').value = p.porciones;
   if(p.pasos.length) document.getElementById('edPasos').value = p.pasos.join('\n');
   if(p.categoria){
+    // .includes() en vez de === porque el formato de referencia ahora
+    // muestra "🥩 Carnes y pescado" (con emoji) — una IA externa suele
+    // copiar el emoji tal cual, y una comparación exacta nunca matchearía.
     const sel = document.getElementById('edCategoria');
-    const match = Array.from(sel.options).find(o=>o.value && normalizarNombre(o.value)===normalizarNombre(p.categoria));
+    const catNorm = normalizarNombre(p.categoria);
+    const match = Array.from(sel.options).find(o=>o.value && catNorm.includes(normalizarNombre(o.value)));
     if(match) sel.value = match.value;
   }
   if(p.ingredientes.length) editorIngredientes = p.ingredientes;
@@ -1205,9 +1209,13 @@ function convertirRecetaPegada(){
 // copiar y pedírselo a una IA de afuera (ChatGPT, Gemini, etc.) — pedido
 // explícito: no todo pasa por la IA de la app, esto es solo referencia.
 function mostrarFormatoPegado(){
-  const catsEjemplo = categoriasOrdenadas().slice(0,3).map(c=>c.Nombre).join(', ') || 'Comida';
+  // Lista completa y en vivo — si agregas/editas/quitas una categoría en
+  // ⚙️ Configuración, este formato de referencia se actualiza solo, porque
+  // lee categoriasOrdenadas() igual que el resto de la app, no una copia
+  // fija.
+  const catsEjemplo = categoriasOrdenadas().map(c=>(c.Emoji?c.Emoji+' ':'')+c.Nombre).join(', ') || 'Comida';
   const formato = 'NOMBRE: <nombre de la receta>\n' +
-    'CATEGORIA: <una de tus categorías, ej: '+catsEjemplo+'>\n' +
+    'CATEGORIA: <una de tus categorías: '+catsEjemplo+'>\n' +
     'TIEMPO: <minutos, solo número>\n' +
     'PORCIONES: <número>\n\n' +
     'INGREDIENTES:\n' +
