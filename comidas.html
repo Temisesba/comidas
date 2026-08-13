@@ -177,7 +177,10 @@ nav.tabbar button .ic{font-size:18px}
     <div class="brand">🍲 Comidas</div>
     <button class="userbtn" onclick="switchTab('config')" id="userBtnHeader">👤</button>
   </header>
-  <div id="connBanner">Sin conexión — viendo copia guardada. Los cambios se reintentarán solos.</div>
+  <div id="connBanner">
+    <span id="connBannerTexto">Sin conexión — viendo copia guardada. Los cambios se reintentarán solos.</span>
+    <button onclick="refreshData()" style="background:none;border:1px solid currentColor;color:inherit;border-radius:8px;padding:2px 8px;font-size:12px;margin-left:6px">🔄 Reintentar</button>
+  </div>
 
   <main>
     <div id="screen-inicio" class="screen active">
@@ -294,7 +297,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Xalapa';
+const BUILD_VERSION = 'Merida2';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -345,11 +348,18 @@ async function apiPost(action, params){
     const f = new FormData(); f.append('payload', JSON.stringify(body));
     const r = await fetch(GAS_URL, { method:'POST', body:f });
     if(!r.ok) throw new Error('HTTP '+r.status);
-    const data = await r.json();
+    let data;
+    try{ data = await r.json(); }
+    catch(e){ throw new Error('Respuesta rara del servidor (no era JSON) — puede ser un problema pasajero de Google, intenta de nuevo'); }
     setConnBanner(false);
     return data;
   }catch(e){
-    setConnBanner(true);
+    // Mensaje real, no un "sin conexión" genérico — puede ser de verdad sin
+    // internet, o una falla pasajera de Google entregando la respuesta
+    // (pasó varias veces durante pruebas: la ejecución en el backend fue
+    // instantánea pero la entrega del resultado tardó/falló) — con el texto
+    // real se puede distinguir un caso del otro la próxima vez.
+    setConnBanner(true, e.message);
     if(ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
     return { ok:false, error: e.message||'sin conexión' };
   }
@@ -376,7 +386,14 @@ async function procesarColaPendiente(){
   try{ localStorage.setItem(COLA_PENDIENTE_KEY, JSON.stringify(restante)); }catch(e){}
   if(ok) showToast(`Se guardaron ${ok} cambio(s) pendiente(s)`);
 }
-function setConnBanner(show){ const el=document.getElementById('connBanner'); if(el) el.classList.toggle('show', show); }
+function setConnBanner(show, mensaje){
+  const el=document.getElementById('connBanner'); if(!el) return;
+  el.classList.toggle('show', show);
+  if(show){
+    const t = document.getElementById('connBannerTexto');
+    if(t) t.textContent = mensaje ? ('Sin respuesta del servidor: '+mensaje) : 'Sin conexión — viendo copia guardada. Los cambios se reintentarán solos.';
+  }
+}
 
 function finishSetup(){
   const gasUrl = document.getElementById('setupGas').value.trim();
