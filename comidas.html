@@ -294,7 +294,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Queretaro';
+const BUILD_VERSION = 'Toluca';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1596,13 +1596,19 @@ function renderCompras(){
 function itemCompraHtml(i){
   const comprado = esVerdadero(i.Comprado);
   return `<div class="compra-item ${comprado?'comprado':''}">
-    <button class="chk" onclick="${comprado?'':`abrirMarcarComprado('${i.ID}')`}">${comprado?'✓':''}</button>
+    <button class="chk" onclick="${comprado?`desmarcarComprado('${i.ID}')`:`abrirMarcarComprado('${i.ID}')`}" title="${comprado?'Toca para desmarcar':'Toca para marcar comprado'}">${comprado?'✓':''}</button>
     <div class="info">
       <div class="nombre">${escAttr(i.Nombre)}</div>
       <div class="meta">${i.Tienda?escAttr(i.Tienda):''}</div>
     </div>
+    <button onclick="abrirHistoricoPrecio('${escAttr(i.Nombre)}')" title="Histórico de precio" style="background:none;border:none;font-size:16px">📈</button>
     <button onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="background:none;border:none;color:var(--danger);font-size:16px">🗑</button>
   </div>`;
+}
+async function desmarcarComprado(id){
+  const r = await apiPost('actualizarCompradoListaGastos', { sesion: gastosSesion, pass: gastosPass, id, comprado: false });
+  if(!r.ok){ showToast('No se pudo desmarcar: '+(r.error||'sin conexión')); return; }
+  await refreshData();
 }
 function findCompra(id){ return DATA.lista_compras.find(i=>i.ID===id); }
 function abrirAgregarCompra(prefill){
