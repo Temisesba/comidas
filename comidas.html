@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Campeche2';
+const BUILD_VERSION = 'Tepic';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1629,19 +1629,38 @@ function renderCompras(){
   if(comprados.length) html += `<div class="grupo-titulo">✅ Comprados</div>` + comprados.map(i=>itemCompraHtml(i)).join('');
   cont.innerHTML = html;
 }
+// El check ahora SIEMPRE es instantáneo en los dos sentidos — antes,
+// marcar (a diferencia de desmarcar) abría un formulario de precio, lo que
+// se sentía como "no puso la palomita" (parecía que el toque no hizo
+// nada, solo abrió otra pantalla). Registrar el precio/crear el
+// ingrediente en inventario sigue existiendo, pero como su propio botón
+// 🛒 explícito, no escondido detrás del check.
 function itemCompraHtml(i){
   const comprado = esVerdadero(i.Comprado);
   return `<div class="compra-item ${comprado?'comprado':''}">
-    <button class="chk" onclick="${comprado?`desmarcarComprado('${i.ID}')`:`abrirMarcarComprado('${i.ID}')`}" title="${comprado?'Toca para desmarcar':'Toca para marcar comprado'}">${comprado?'✓':''}</button>
+    <button class="chk" onclick="toggleComprado('${i.ID}',${!comprado})" title="${comprado?'Toca para desmarcar':'Toca para marcar comprado'}">${comprado?'✓':''}</button>
     <div class="info">
       <div class="nombre">${escAttr(i.Nombre)}</div>
       <div class="meta">${i.Tienda?escAttr(i.Tienda):''}</div>
     </div>
+    ${comprado?'':`<button class="accion-btn" onclick="abrirMarcarComprado('${i.ID}')" title="Comprar (con precio, se agrega a Ingredientes)">🛒</button>`}
     <button class="accion-btn" onclick="abrirHistoricoPrecio('${escAttr(i.Nombre)}')" title="Histórico de precio">📈</button>
     <button class="accion-btn" onclick="abrirCompararPrecioLista('${escAttr(i.Nombre)}')" title="Comparar un precio que viste">💲</button>
     <button class="accion-btn" onclick="abrirAgregarCompra('${i.ID}')" title="Editar">✏️</button>
     <button class="accion-btn" onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="color:var(--danger)">🗑</button>
   </div>`;
+}
+// Check simple, instantáneo, en cualquier dirección — sin formulario. Es
+// solo la casilla; no crea nada en Ingredientes ni toca precios (para eso
+// está 🛒 "Comprar").
+async function toggleComprado(id, nuevoValor){
+  const item = findCompra(id); if(!item) return;
+  const anterior = esVerdadero(item.Comprado);
+  item.Comprado = nuevoValor;
+  renderCompras();
+  const r = await apiPost('actualizarCompradoListaGastos', { sesion: gastosSesion, pass: gastosPass, id, comprado: nuevoValor });
+  if(!r.ok){ item.Comprado = anterior; renderCompras(); showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
 }
 // UI optimista: se desmarca de inmediato en pantalla (no espera al
 // backend, y mucho menos a un refreshData() completo) — antes se veía
@@ -1651,14 +1670,6 @@ function itemCompraHtml(i){
 // tras la redirección puede tardar o fallar aunque el guardado ya haya
 // pasado), la casilla se quedaba viéndose como si nada hubiera pasado
 // aunque sí se hubiera guardado.
-async function desmarcarComprado(id){
-  const item = findCompra(id); if(!item) return;
-  item.Comprado = false;
-  renderCompras();
-  const r = await apiPost('actualizarCompradoListaGastos', { sesion: gastosSesion, pass: gastosPass, id, comprado: false });
-  if(!r.ok){ item.Comprado = true; renderCompras(); showToast('No se pudo desmarcar: '+(r.error||'sin conexión')); return; }
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
-}
 // Comparar un precio que viste (en la tienda, un anuncio…) SIN comprarlo
 // todavía ni tocar el inventario — solo lectura, no se guarda nada.
 function abrirCompararPrecioLista(nombre){
