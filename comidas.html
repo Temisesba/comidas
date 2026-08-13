@@ -231,6 +231,14 @@ nav.tabbar button .ic{font-size:18px}
       </div></div>
 
       <div class="card"><div class="body">
+        <h3>🔗 Inventario y lista de compras (Gastos)</h3>
+        <p class="hint">Ingredientes y Lista de compras ya NO son propios de Comidas — se leen y escriben en vivo del mismo inventario/lista que ya usas en tu app de Gastos. Elige a qué sesión de Gastos conectar.</p>
+        <p class="hint">Sesión vinculada: <b id="cfgGastosSesion">Ninguna todavía</b></p>
+        <div id="cfgGastosLista"></div>
+        <button class="btn secondary" style="margin-top:8px" onclick="mostrarSelectorSesionGastos()">🔄 Elegir sesión de Gastos</button>
+      </div></div>
+
+      <div class="card"><div class="body">
         <h3>Usuarios</h3>
         <div id="cfgUsuariosLista"></div>
         <button class="btn secondary" style="margin-top:8px" onclick="abrirNuevoUsuarioConfig()">➕ Agregar usuario</button>
@@ -286,9 +294,15 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Merida';
+const BUILD_VERSION = 'Puebla';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
+// Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
+// Comidas — esta es la sesión de Gastos elegida (una por dispositivo, mismo
+// criterio que GAS_URL). Sin esto, Ingredientes/Compras muestran un aviso
+// en vez de datos.
+let gastosSesion = localStorage.getItem('comidas_gastos_sesion') || '';
+let gastosPass = localStorage.getItem('comidas_gastos_pass') || '';
 let soloFavoritas = false;
 let recetasChipActivo = 'Todas';
 
@@ -383,6 +397,39 @@ function cambiarUrlBackend(){
     location.reload();
   });
 }
+// ── Vincular con una sesión de Gastos (Ingredientes/Lista de compras) ──
+async function mostrarSelectorSesionGastos(){
+  const cont = document.getElementById('cfgGastosLista');
+  cont.innerHTML = '<p class="hint">Buscando tus sesiones de Gastos…</p>';
+  const r = await apiPost('listarSesionesGastos', {});
+  if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo conectar con Gastos: ${escAttr(r.error||'sin conexión')}</p>`; return; }
+  cont.innerHTML = r.sesiones.map(s=>
+    `<button class="btn ghost block" style="margin-top:6px;text-align:left" onclick="elegirSesionGastos('${escAttr(s.sesion)}',${s.tienePassword})">${escAttr(s.sesion)} ${s.tienePassword?'🔒':''}</button>`
+  ).join('');
+}
+function elegirSesionGastos(sesion, tienePassword){
+  if(!tienePassword){ confirmarSesionGastos(sesion, ''); return; }
+  const cont = document.getElementById('cfgGastosLista');
+  cont.innerHTML = `<div class="field"><label>Contraseña de "${escAttr(sesion)}"</label><input type="password" id="gastosPassIntento"></div>
+    <div class="hint" id="gastosPassErr"></div>
+    <button class="btn" onclick="confirmarSesionGastos('${escAttr(sesion)}', document.getElementById('gastosPassIntento').value)">Entrar</button>`;
+}
+async function confirmarSesionGastos(sesion, pass){
+  const r = await apiPost('validarSesionGastos', { sesion, pass });
+  if(!r.ok){
+    const err = document.getElementById('gastosPassErr');
+    if(err) err.textContent = r.error==='PASSWORD' ? 'Contraseña incorrecta' : (r.error||'No se pudo validar');
+    else showToast(r.error||'No se pudo validar');
+    return;
+  }
+  gastosSesion = sesion; gastosPass = pass;
+  localStorage.setItem('comidas_gastos_sesion', sesion);
+  localStorage.setItem('comidas_gastos_pass', pass);
+  document.getElementById('cfgGastosLista').innerHTML = '';
+  showToast('✓ Vinculado con "'+sesion+'"');
+  renderConfig();
+  await refreshData();
+}
 function normalizeData(d){
   return {
     usuarios: d.usuarios||[], categorias: d.categorias||[], recetas: d.recetas||[],
@@ -411,8 +458,22 @@ async function refreshData(){
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
     localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
     purgarPapeleraAntigua();
-    renderAllScreens();
   }
+  await cargarInventarioYListaDeGastos();
+  renderAllScreens();
+}
+// Ingredientes y Lista de compras NO vienen de getAll — viven en el Sheet
+// de Gastos y necesitan la sesión+contraseña elegidas en Configuración.
+async function cargarInventarioYListaDeGastos(){
+  if(!gastosSesion){ DATA.inventario = []; DATA.lista_compras = []; return; }
+  const [rInv, rLista] = await Promise.all([
+    apiPost('getInventarioGastos', { sesion: gastosSesion, pass: gastosPass }),
+    apiPost('getListaComprasGastos', { sesion: gastosSesion, pass: gastosPass })
+  ]);
+  if(rInv && rInv.ok) DATA.inventario = rInv.items;
+  else if(rInv && rInv.error==='PASSWORD') showToast('La contraseña de la sesión de Gastos ya no es válida — vincúlala de nuevo en Configuración');
+  if(rLista && rLista.ok) DATA.lista_compras = rLista.items;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
 }
 function renderAllScreens(){
   renderInicio(); renderRecetas(); renderInventario(); renderCompras(); renderCalendario(); renderConfig();
@@ -814,10 +875,10 @@ function estrellasHtml(valor, chico){
 // ============================================================
 function purgarPapeleraAntigua(){
   const limite = new Date(hoyLocalISO()+'T00:00:00'); limite.setDate(limite.getDate()-30);
+  // INVENTARIO/LISTA_COMPRAS ya no tienen papelera (viven en Gastos, se
+  // borran directo) — solo RECETAS/CALENDARIO siguen usando papelera propia.
   const revisar = [
     ['RECETAS', DATA.recetas, 'FechaAlta'],
-    ['INVENTARIO', DATA.inventario, 'FechaAlta'],
-    ['LISTA_COMPRAS', DATA.lista_compras, 'FechaAlta'],
     ['CALENDARIO', DATA.calendario, 'Fecha'],
   ];
   revisar.forEach(([tabla, filas, campoFecha])=>{
@@ -833,14 +894,18 @@ function purgarPapeleraAntigua(){
 // ============================================================
 function renderInicio(){
   if(!usuarioActivo) return;
-  const inv = activos(DATA.inventario).filter(f=>{ const u = urgenciaCaducidad(f.FechaCaducidad); return u==='vencido' || u==='pronto'; })
-    .sort((a,b)=> (diasHasta(a.FechaCaducidad)??999) - (diasHasta(b.FechaCaducidad)??999)).slice(0,6);
   const cad = document.getElementById('inicioCaducar');
-  cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div>` + (inv.length ? inv.map(f=>{
-    const d = diasHasta(f.FechaCaducidad);
-    const texto = d<0 ? 'venció hace '+Math.abs(d)+' día(s)' : d===0 ? 'caduca hoy' : 'caduca en '+d+' día(s)';
-    return `<div class="inv-item ${urgenciaCaducidad(f.FechaCaducidad)}"><div class="info"><div class="nombre">${catEmoji(f.Categoria)} ${escAttr(f.Nombre)}</div><div class="meta">${texto}</div></div></div>`;
-  }).join('') : `<p class="hint">Nada por caducar pronto 👍</p>`);
+  if(!gastosSesion){
+    cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div><p class="hint">Vincula tu sesión de Gastos en ⚙️ Configuración para ver esto.</p>`;
+  } else {
+    const inv = activos(DATA.inventario).filter(f=>{ const u = urgenciaCaducidad(f.FechaCaducidad); return u==='vencido' || u==='pronto'; })
+      .sort((a,b)=> (diasHasta(a.FechaCaducidad)??999) - (diasHasta(b.FechaCaducidad)??999)).slice(0,6);
+    cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div>` + (inv.length ? inv.map(f=>{
+      const d = diasHasta(f.FechaCaducidad);
+      const texto = d<0 ? 'venció hace '+Math.abs(d)+' día(s)' : d===0 ? 'caduca hoy' : 'caduca en '+d+' día(s)';
+      return `<div class="inv-item ${urgenciaCaducidad(f.FechaCaducidad)}"><div class="info"><div class="nombre">${catEmoji(f.Categoria)} ${escAttr(f.Nombre)}</div><div class="meta">${texto}</div></div></div>`;
+    }).join('') : `<p class="hint">Nada por caducar pronto 👍</p>`);
+  }
 
   const recetas = activos(DATA.recetas).map(r=>({ r, m: matchReceta(r) })).filter(x=>x.m.pct>0).sort((a,b)=>b.m.pct-a.m.pct).slice(0,5);
   const qc = document.getElementById('inicioQueCocino');
@@ -1011,15 +1076,14 @@ function pedirEliminarReceta(id){
   });
 }
 async function agregarFaltantesALista(id){
+  if(!gastosSesion){ showToast('Vincula tu sesión de Gastos en Configuración primero'); return; }
   const r = findReceta(id); if(!r) return;
   const ings = parseIngredientes(r.IngredientesJSON);
   const faltantes = ings.filter(i=>!tieneIngrediente(i).tiene);
   for(const i of faltantes){
-    const row = { ID: uid(), Nombre: i.nombre, Categoria:'', Cantidad: i.cantidad||'', Unidad: i.unidad||'', Tienda:'', Comprado:false, RecetaOrigenID: id, Privado:false, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera:false };
-    DATA.lista_compras.push(row);
-    await apiPost('saveRow', { table:'LISTA_COMPRAS', row });
+    await apiPost('guardarListaComprasGastos', { sesion: gastosSesion, pass: gastosPass, row: { Nombre: i.nombre, Categoria:'', Tienda:'', Comprado:false } });
   }
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  await refreshData();
   showToast(`✓ ${faltantes.length} item(s) agregados a la lista de compras`);
 }
 
@@ -1240,6 +1304,8 @@ function ingredientesSinStock(){
 }
 function renderInventario(){
   if(!usuarioActivo) return;
+  const cont0 = document.getElementById('inventarioLista');
+  if(!gastosSesion){ cont0.innerHTML = '<p class="hint">Vincula tu sesión de Gastos en ⚙️ Configuración para ver y agregar ingredientes.</p>'; return; }
   const qEl = document.getElementById('ingredientesBuscar');
   const q = normalizarNombre(qEl?qEl.value:'');
   let lista = activos(DATA.inventario);
@@ -1265,7 +1331,7 @@ function renderInventario(){
         const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
         return `<div class="inv-item ${u}">
           <div class="info">
-            <div class="nombre">${escAttr(f.Nombre)} ${esVerdadero(f.Privado)?'🔒':''}</div>
+            <div class="nombre">${escAttr(f.Nombre)}</div>
             <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}</div>
           </div>
           <div class="acciones">
@@ -1327,7 +1393,6 @@ function abrirEditorInventario(id){
     </div>
     <div class="field"><label>Caduca</label><input type="date" id="ivCaducidad" value="${f?escAttr(f.FechaCaducidad):''}"></div>
     <div class="field"><label>Tienda</label><input type="text" id="ivTienda" value="${f?escAttr(f.Tienda):''}"></div>
-    <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="ivPrivado" style="width:auto" ${f&&esVerdadero(f.Privado)?'checked':''}> 🔒 Privado (solo yo lo veo)</label>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
       <button class="btn" id="ivGuardarBtn" onclick="guardarInventario('${id||''}')">💾 Guardar</button>
@@ -1339,31 +1404,23 @@ async function guardarInventario(id){
   if(!nombre){ showToast('Falta el nombre'); return; }
   const btn = document.getElementById('ivGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  const anterior = id ? findInventario(id) : null;
   const row = {
-    ID: id || uid(), Nombre: nombre, Categoria: document.getElementById('ivCategoria').value,
+    ID: id || '', Nombre: nombre, Categoria: document.getElementById('ivCategoria').value,
     Cantidad: document.getElementById('ivCantidad').value, Unidad: document.getElementById('ivUnidad').value,
-    FechaCaducidad: document.getElementById('ivCaducidad').value, Tienda: document.getElementById('ivTienda').value,
-    Privado: document.getElementById('ivPrivado').checked, Usuario: anterior?anterior.Usuario:usuarioActivo.ID,
-    FechaAlta: anterior?anterior.FechaAlta:hoyLocalISO(), Papelera: false
+    FechaCaducidad: document.getElementById('ivCaducidad').value, Tienda: document.getElementById('ivTienda').value
   };
-  const r = await apiPost('saveRow', { table:'INVENTARIO', row });
+  const r = await apiPost('guardarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
-  const idx = DATA.inventario.findIndex(x=>x.ID===row.ID);
-  if(idx>=0) DATA.inventario[idx]=row; else DATA.inventario.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  renderInventario(); renderInicio();
+  await refreshData();
   showToast('Guardado');
 }
 function pedirEliminarInventario(id){
-  confirmarEliminar('Este item se moverá a la papelera.', async ()=>{
-    const f = findInventario(id); if(!f) return;
-    f.Papelera = true;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
-    renderInventario(); renderInicio();
-    await apiPost('saveRow', { table:'INVENTARIO', row:f });
-    showToast('Movido a la papelera');
+  confirmarEliminar('Este ingrediente se elimina también de tu inventario en Gastos — no se puede deshacer.', async ()=>{
+    const r = await apiPost('eliminarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, id });
+    if(!r.ok){ showToast('No se pudo eliminar: '+(r.error||'sin conexión')); return; }
+    await refreshData();
+    showToast('Eliminado');
   });
 }
 function precioBadgeTexto(c){
@@ -1376,28 +1433,20 @@ function abrirRegistrarPrecio(id){
   const f = findInventario(id); if(!f) return;
   const html = `
     <h3>💲 Registrar precio: ${escAttr(f.Nombre)}</h3>
+    <p class="hint">Se compara contra el histórico de precios de este mismo producto en Gastos.</p>
     <div class="field"><label>Precio</label><input type="number" step="0.01" id="prPrecio" placeholder="0.00"></div>
-    <div class="field-row">
-      <div class="field"><label>Cantidad</label><input type="text" id="prCantidad" value="${escAttr(f.Cantidad||'')}"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="prUnidad" value="${escAttr(f.Unidad||'')}"></div>
-    </div>
-    <div class="field"><label>Tienda</label><input type="text" id="prTienda" value="${escAttr(f.Tienda||'')}"></div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
-      <button class="btn" id="prGuardarBtn" onclick="guardarPrecioManual('${escAttr(f.Nombre)}')">💾 Guardar</button>
+      <button class="btn" id="prGuardarBtn" onclick="guardarPrecioManual('${id}','${escAttr(f.Nombre)}')">💾 Guardar</button>
     </div>`;
   abrirModal(html, {confirmarCierre:true});
 }
-async function guardarPrecioManual(itemNombre){
+async function guardarPrecioManual(id, itemNombre){
   const precio = document.getElementById('prPrecio').value;
   if(!precio){ showToast('Escribe un precio'); return; }
   const btn = document.getElementById('prGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  const r = await apiPost('registrarPrecio', {
-    item: itemNombre, precio, cantidad: document.getElementById('prCantidad').value,
-    unidad: document.getElementById('prUnidad').value, tienda: document.getElementById('prTienda').value,
-    fecha: hoyLocalISO(), usuario: usuarioActivo.ID
-  });
+  const r = await apiPost('registrarPrecioGastos', { sesion: gastosSesion, pass: gastosPass, item: itemNombre, precio, rowIndex: id });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   const b = precioBadgeTexto(r.comparacion);
@@ -1410,8 +1459,9 @@ async function guardarPrecioManual(itemNombre){
 // ============================================================
 function renderCompras(){
   if(!usuarioActivo) return;
-  const lista = activos(DATA.lista_compras);
   const cont = document.getElementById('comprasLista');
+  if(!gastosSesion){ cont.innerHTML = '<p class="hint">Vincula tu sesión de Gastos en ⚙️ Configuración para ver y agregar tu lista de compras.</p>'; return; }
+  const lista = activos(DATA.lista_compras);
   if(!lista.length){ cont.innerHTML = '<p class="hint">Tu lista de compras está vacía.</p>'; return; }
   const pendientes = lista.filter(i=>!esVerdadero(i.Comprado));
   const comprados = lista.filter(i=>esVerdadero(i.Comprado));
@@ -1429,8 +1479,8 @@ function itemCompraHtml(i){
   return `<div class="compra-item ${comprado?'comprado':''}">
     <button class="chk" onclick="${comprado?'':`abrirMarcarComprado('${i.ID}')`}">${comprado?'✓':''}</button>
     <div class="info">
-      <div class="nombre">${escAttr(i.Nombre)} ${esVerdadero(i.Privado)?'🔒':''}</div>
-      <div class="meta">${escAttr(i.Cantidad||'')} ${escAttr(i.Unidad||'')}${i.Tienda?(' · '+escAttr(i.Tienda)):''}</div>
+      <div class="nombre">${escAttr(i.Nombre)}</div>
+      <div class="meta">${i.Tienda?escAttr(i.Tienda):''}</div>
     </div>
     <button onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="background:none;border:none;color:var(--danger);font-size:16px">🗑</button>
   </div>`;
@@ -1441,12 +1491,7 @@ function abrirAgregarCompra(prefill){
     <h3>➕ Agregar a la lista</h3>
     <div class="field"><label>Nombre</label><input type="text" id="lcNombre" value="${prefill?escAttr(prefill.nombre):''}"></div>
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('lcCategoria','')}</div>
-    <div class="field-row">
-      <div class="field"><label>Cantidad</label><input type="text" id="lcCantidad"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="lcUnidad"></div>
-    </div>
     <div class="field"><label>Tienda (opcional)</label><input type="text" id="lcTienda"></div>
-    <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="lcPrivado" style="width:auto"> 🔒 Privado (solo yo lo veo)</label>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
       <button class="btn" id="lcGuardarBtn" onclick="guardarItemLista()">💾 Guardar</button>
@@ -1458,37 +1503,28 @@ async function guardarItemLista(){
   if(!nombre){ showToast('Falta el nombre'); return; }
   const btn = document.getElementById('lcGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  const row = {
-    ID: uid(), Nombre: nombre, Categoria: document.getElementById('lcCategoria').value,
-    Cantidad: document.getElementById('lcCantidad').value, Unidad: document.getElementById('lcUnidad').value,
-    Tienda: document.getElementById('lcTienda').value, Comprado:false, RecetaOrigenID:'',
-    Privado: document.getElementById('lcPrivado').checked, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera:false
-  };
-  const r = await apiPost('saveRow', { table:'LISTA_COMPRAS', row });
+  const row = { Nombre: nombre, Categoria: document.getElementById('lcCategoria').value, Tienda: document.getElementById('lcTienda').value, Comprado:false };
+  const r = await apiPost('guardarListaComprasGastos', { sesion: gastosSesion, pass: gastosPass, row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
-  DATA.lista_compras.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  renderCompras();
+  await refreshData();
   showToast('Agregado a la lista');
 }
 function pedirEliminarCompra(id){
-  confirmarEliminar('Este item se moverá a la papelera.', async ()=>{
-    const i = findCompra(id); if(!i) return;
-    i.Papelera = true;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
-    renderCompras();
-    await apiPost('saveRow', { table:'LISTA_COMPRAS', row:i });
+  confirmarEliminar('Este item se elimina también de tu lista de compras en Gastos — no se puede deshacer.', async ()=>{
+    const r = await apiPost('eliminarItemListaComprasGastos', { sesion: gastosSesion, pass: gastosPass, id });
+    if(!r.ok){ showToast('No se pudo eliminar: '+(r.error||'sin conexión')); return; }
+    await refreshData();
   });
 }
 function abrirMarcarComprado(id){
   const i = findCompra(id); if(!i) return;
   const html = `
     <h3>✅ Comprado: ${escAttr(i.Nombre)}</h3>
-    <div class="field"><label>Precio pagado</label><input type="number" step="0.01" id="mcPrecio" placeholder="0.00"></div>
+    <div class="field"><label>Precio pagado (opcional)</label><input type="number" step="0.01" id="mcPrecio" placeholder="0.00"></div>
     <div class="field-row">
-      <div class="field"><label>Cantidad</label><input type="text" id="mcCantidad" value="${escAttr(i.Cantidad||'')}"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="mcUnidad" value="${escAttr(i.Unidad||'')}"></div>
+      <div class="field"><label>Cantidad</label><input type="text" id="mcCantidad"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="mcUnidad"></div>
     </div>
     <div class="field"><label>Tienda</label><input type="text" id="mcTienda" value="${escAttr(i.Tienda||'')}"></div>
     <div class="field"><label>Caduca (opcional)</label><input type="date" id="mcCaducidad"></div>
@@ -1503,13 +1539,13 @@ async function confirmarCompra(id){
   const btn = document.getElementById('mcGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
   const body = {
+    sesion: gastosSesion, pass: gastosPass,
     listaId: id, nombre: i.Nombre, categoria: i.Categoria,
     cantidad: document.getElementById('mcCantidad').value, unidad: document.getElementById('mcUnidad').value,
     tienda: document.getElementById('mcTienda').value, precio: document.getElementById('mcPrecio').value,
-    fechaCaducidad: document.getElementById('mcCaducidad').value, privado: esVerdadero(i.Privado),
-    usuario: usuarioActivo.ID, fecha: hoyLocalISO()
+    fechaCaducidad: document.getElementById('mcCaducidad').value
   };
-  const r = await apiPost('registrarCompra', body);
+  const r = await apiPost('marcarCompradoGastos', body);
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Confirmar compra'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   await refreshData();
@@ -1519,10 +1555,10 @@ async function confirmarCompra(id){
 async function limpiarComprados(){
   const comprados = activos(DATA.lista_compras).filter(i=>esVerdadero(i.Comprado));
   if(!comprados.length){ showToast('No hay comprados que limpiar'); return; }
-  confirmarEliminar('Se moverán '+comprados.length+' item(s) comprados a la papelera.', async ()=>{
-    for(const i of comprados){ i.Papelera = true; await apiPost('saveRow', { table:'LISTA_COMPRAS', row:i }); }
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
-    renderCompras();
+  confirmarEliminar('Se van a quitar '+comprados.length+' item(s) comprados de tu lista de compras en Gastos — no se puede deshacer.', async ()=>{
+    const r = await apiPost('limpiarCompradosListaGastos', { sesion: gastosSesion, pass: gastosPass });
+    if(!r.ok){ showToast('No se pudo limpiar: '+(r.error||'sin conexión')); return; }
+    await refreshData();
     showToast('Limpio');
   });
 }
@@ -1635,6 +1671,7 @@ function renderConfig(){
   document.getElementById('cfgUsuarioActivo').textContent = usuarioActivo.Nombre;
   document.getElementById('cfgVersion').textContent = BUILD_VERSION;
   document.getElementById('cfgSheetLink').innerHTML = SHEET_URL ? `<a href="${SHEET_URL}" target="_blank" rel="noopener">📄 Ver / exportar mis datos (Google Sheet)</a>` : '';
+  document.getElementById('cfgGastosSesion').textContent = gastosSesion || 'Ninguna todavía';
 
   document.getElementById('cfgUsuariosLista').innerHTML = usuariosActivos().map(u=>`
     <div class="userlist-row">
@@ -1786,8 +1823,6 @@ const NOMBRE_TABLA_PAPELERA = { RECETAS:'receta', INVENTARIO:'ingrediente', LIST
 function renderPapeleraConfig(){
   const items = [];
   DATA.recetas.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'RECETAS', nombre:r.Nombre, row:r}));
-  DATA.inventario.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'INVENTARIO', nombre:r.Nombre, row:r}));
-  DATA.lista_compras.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'LISTA_COMPRAS', nombre:r.Nombre, row:r}));
   DATA.usuarios.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'USUARIOS', nombre:r.Nombre, row:r}));
   DATA.calendario.filter(r=>esVerdadero(r.Papelera)).forEach(r=>{
     const desc = r.RecetaID ? (findReceta(r.RecetaID)?findReceta(r.RecetaID).Nombre:'(receta eliminada)') : r.TextoLibre;
