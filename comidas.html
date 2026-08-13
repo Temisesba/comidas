@@ -764,6 +764,7 @@ function purgarPapeleraAntigua(){
     ['RECETAS', DATA.recetas, 'FechaAlta'],
     ['INVENTARIO', DATA.inventario, 'FechaAlta'],
     ['LISTA_COMPRAS', DATA.lista_compras, 'FechaAlta'],
+    ['CALENDARIO', DATA.calendario, 'Fecha'],
   ];
   revisar.forEach(([tabla, filas, campoFecha])=>{
     filas.filter(f=>esVerdadero(f.Papelera) && f[campoFecha]).forEach(f=>{
@@ -1553,6 +1554,10 @@ function renderPapeleraConfig(){
   DATA.inventario.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'INVENTARIO', nombre:r.Nombre, row:r}));
   DATA.lista_compras.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'LISTA_COMPRAS', nombre:r.Nombre, row:r}));
   DATA.usuarios.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'USUARIOS', nombre:r.Nombre, row:r}));
+  DATA.calendario.filter(r=>esVerdadero(r.Papelera)).forEach(r=>{
+    const desc = r.RecetaID ? (findReceta(r.RecetaID)?findReceta(r.RecetaID).Nombre:'(receta eliminada)') : r.TextoLibre;
+    items.push({tabla:'CALENDARIO', nombre: fmtFecha(r.Fecha)+' '+r.Slot+': '+desc, row:r});
+  });
   const cont = document.getElementById('cfgPapelera');
   if(!items.length){ cont.innerHTML = '<p class="hint">La papelera está vacía.</p>'; return; }
   cont.innerHTML = items.map(it=>`<div class="userlist-row">
