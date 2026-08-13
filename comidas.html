@@ -294,7 +294,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Toluca';
+const BUILD_VERSION = 'Cuernavaca';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1544,16 +1544,21 @@ function pedirEliminarInventario(id){
 }
 function precioBadgeTexto(c){
   if(!c || c.estado==='sinHistorial') return { txt:'Primer precio registrado', clase:'normal' };
-  if(c.estado==='caro') return { txt:'🔺 Más caro que tu promedio ('+fmtMoneda(c.promedio)+')', clase:'caro' };
-  if(c.estado==='bueno') return { txt:'🔻 Buen precio (promedio '+fmtMoneda(c.promedio)+')', clase:'bueno' };
-  return { txt:'➖ Precio normal (promedio '+fmtMoneda(c.promedio)+')', clase:'normal' };
+  const suf = c.porUnidad ? '/unidad comparable' : ' (precio total, sin cantidad para comparar por unidad)';
+  if(c.estado==='caro') return { txt:'🔺 Más caro que tu promedio ('+fmtMoneda(c.promedio)+suf+')', clase:'caro' };
+  if(c.estado==='bueno') return { txt:'🔻 Buen precio (promedio '+fmtMoneda(c.promedio)+suf+')', clase:'bueno' };
+  return { txt:'➖ Precio normal (promedio '+fmtMoneda(c.promedio)+suf+')', clase:'normal' };
 }
 function abrirRegistrarPrecio(id){
   const f = findInventario(id); if(!f) return;
   const html = `
     <h3>💲 Registrar precio: ${escAttr(f.Nombre)}</h3>
-    <p class="hint">Se compara contra el histórico de precios de este mismo producto en Gastos.</p>
+    <p class="hint">Pon precio Y cantidad (ej. 50 pesos por 1 kg) para comparar de verdad contra el histórico, aunque hayas comprado un tamaño distinto de empaque.</p>
     <div class="field"><label>Precio</label><input type="number" step="0.01" id="prPrecio" placeholder="0.00"></div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="prCantidad" value="${escAttr(f.Cantidad||'')}"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="prUnidad" value="${escAttr(f.Unidad||'')}"></div>
+    </div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
       <button class="btn" id="prGuardarBtn" onclick="guardarPrecioManual('${id}','${escAttr(f.Nombre)}')">💾 Guardar</button>
@@ -1565,7 +1570,10 @@ async function guardarPrecioManual(id, itemNombre){
   if(!precio){ showToast('Escribe un precio'); return; }
   const btn = document.getElementById('prGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  const r = await apiPost('registrarPrecioGastos', { sesion: gastosSesion, pass: gastosPass, item: itemNombre, precio, rowIndex: id });
+  const r = await apiPost('registrarPrecioGastos', {
+    sesion: gastosSesion, pass: gastosPass, item: itemNombre, precio, rowIndex: id,
+    cantidad: document.getElementById('prCantidad').value, unidad: document.getElementById('prUnidad').value
+  });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   const b = precioBadgeTexto(r.comparacion);
@@ -1602,6 +1610,8 @@ function itemCompraHtml(i){
       <div class="meta">${i.Tienda?escAttr(i.Tienda):''}</div>
     </div>
     <button onclick="abrirHistoricoPrecio('${escAttr(i.Nombre)}')" title="Histórico de precio" style="background:none;border:none;font-size:16px">📈</button>
+    <button onclick="abrirCompararPrecioLista('${escAttr(i.Nombre)}')" title="Comparar un precio que viste" style="background:none;border:none;font-size:16px">💲</button>
+    <button onclick="abrirAgregarCompra('${i.ID}')" title="Editar" style="background:none;border:none;font-size:16px">✏️</button>
     <button onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="background:none;border:none;color:var(--danger);font-size:16px">🗑</button>
   </div>`;
 }
@@ -1610,30 +1620,63 @@ async function desmarcarComprado(id){
   if(!r.ok){ showToast('No se pudo desmarcar: '+(r.error||'sin conexión')); return; }
   await refreshData();
 }
-function findCompra(id){ return DATA.lista_compras.find(i=>i.ID===id); }
-function abrirAgregarCompra(prefill){
+// Comparar un precio que viste (en la tienda, un anuncio…) SIN comprarlo
+// todavía ni tocar el inventario — solo lectura, no se guarda nada.
+function abrirCompararPrecioLista(nombre){
   const html = `
-    <h3>➕ Agregar a la lista</h3>
-    <div class="field"><label>Nombre</label><input type="text" id="lcNombre" value="${prefill?escAttr(prefill.nombre):''}"></div>
-    <div class="field"><label>Categoría</label>${selectCategoriasHtml('lcCategoria','')}</div>
-    <div class="field"><label>Tienda (opcional)</label><input type="text" id="lcTienda"></div>
+    <h3>💲 Comparar precio: ${escAttr(nombre)}</h3>
+    <p class="hint">Esto NO se guarda — solo te dice si es buen precio comparado con tu histórico. Pon precio y cantidad (ej. 50 pesos por 1 kg) para comparar de verdad.</p>
+    <div class="field"><label>Precio</label><input type="number" step="0.01" id="cpPrecio" placeholder="0.00"></div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="cpCantidad"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="cpUnidad"></div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
+      <button class="btn" id="cpBtn" onclick="compararPrecioLista('${escAttr(nombre)}')">Comparar</button>
+    </div>`;
+  abrirModal(html);
+}
+async function compararPrecioLista(nombre){
+  const precio = document.getElementById('cpPrecio').value;
+  if(!precio){ showToast('Escribe un precio'); return; }
+  const btn = document.getElementById('cpBtn');
+  btn.disabled = true; btn.textContent = 'Comparando…';
+  const r = await apiPost('registrarPrecioGastos', {
+    sesion: gastosSesion, pass: gastosPass, item: nombre, precio,
+    cantidad: document.getElementById('cpCantidad').value, unidad: document.getElementById('cpUnidad').value
+  });
+  btn.disabled = false; btn.textContent = 'Comparar';
+  if(!r.ok){ showToast('No se pudo comparar: '+(r.error||'sin conexión')); return; }
+  const b = precioBadgeTexto(r.comparacion);
+  showToast(b.txt);
+}
+function findCompra(id){ return DATA.lista_compras.find(i=>i.ID===id); }
+function abrirAgregarCompra(id){
+  const item = id ? findCompra(id) : null;
+  const html = `
+    <h3>${item?'✏️ Editar item':'➕ Agregar a la lista'}</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="lcNombre" value="${item?escAttr(item.Nombre):''}"></div>
+    <div class="field"><label>Categoría</label>${selectCategoriasHtml('lcCategoria', item?item.Categoria:'')}</div>
+    <div class="field"><label>Tienda (opcional)</label><input type="text" id="lcTienda" value="${item?escAttr(item.Tienda):''}"></div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
-      <button class="btn" id="lcGuardarBtn" onclick="guardarItemLista()">💾 Guardar</button>
+      <button class="btn" id="lcGuardarBtn" onclick="guardarItemLista('${id||''}')">💾 Guardar</button>
     </div>`;
   abrirModal(html, {confirmarCierre:true});
 }
-async function guardarItemLista(){
+async function guardarItemLista(id){
   const nombre = document.getElementById('lcNombre').value.trim();
   if(!nombre){ showToast('Falta el nombre'); return; }
   const btn = document.getElementById('lcGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  const row = { Nombre: nombre, Categoria: document.getElementById('lcCategoria').value, Tienda: document.getElementById('lcTienda').value, Comprado:false };
+  const anterior = id ? findCompra(id) : null;
+  const row = { ID: id||'', Nombre: nombre, Categoria: document.getElementById('lcCategoria').value, Tienda: document.getElementById('lcTienda').value, Comprado: anterior?esVerdadero(anterior.Comprado):false };
   const r = await apiPost('guardarListaComprasGastos', { sesion: gastosSesion, pass: gastosPass, row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   await refreshData();
-  showToast('Agregado a la lista');
+  showToast(id?'Guardado':'Agregado a la lista');
 }
 function pedirEliminarCompra(id){
   confirmarEliminar('Este item se elimina también de tu lista de compras en Gastos — no se puede deshacer.', async ()=>{
