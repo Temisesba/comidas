@@ -134,6 +134,8 @@ nav.tabbar button .ic{font-size:18px}
 .compra-item .chk{width:26px;height:26px;flex:none;border-radius:50%;border:2px solid var(--accent);background:none;font-size:14px;display:flex;align-items:center;justify-content:center}
 .compra-item.comprado .chk{background:var(--accent);color:#fff}
 .compra-item .info{flex:1;min-width:0}
+.compra-item .accion-btn{background:none;border:none;font-size:16px;padding:8px;min-width:38px;min-height:38px;border-radius:8px}
+.compra-item .accion-btn:active{background:var(--accent-soft)}
 
 .dia-col{margin-bottom:18px}
 .dia-header{font-weight:700;font-size:14px;margin-bottom:6px}
@@ -297,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Merida2';
+const BUILD_VERSION = 'Chetumal';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1634,16 +1636,27 @@ function itemCompraHtml(i){
       <div class="nombre">${escAttr(i.Nombre)}</div>
       <div class="meta">${i.Tienda?escAttr(i.Tienda):''}</div>
     </div>
-    <button onclick="abrirHistoricoPrecio('${escAttr(i.Nombre)}')" title="Histórico de precio" style="background:none;border:none;font-size:16px">📈</button>
-    <button onclick="abrirCompararPrecioLista('${escAttr(i.Nombre)}')" title="Comparar un precio que viste" style="background:none;border:none;font-size:16px">💲</button>
-    <button onclick="abrirAgregarCompra('${i.ID}')" title="Editar" style="background:none;border:none;font-size:16px">✏️</button>
-    <button onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="background:none;border:none;color:var(--danger);font-size:16px">🗑</button>
+    <button class="accion-btn" onclick="abrirHistoricoPrecio('${escAttr(i.Nombre)}')" title="Histórico de precio">📈</button>
+    <button class="accion-btn" onclick="abrirCompararPrecioLista('${escAttr(i.Nombre)}')" title="Comparar un precio que viste">💲</button>
+    <button class="accion-btn" onclick="abrirAgregarCompra('${i.ID}')" title="Editar">✏️</button>
+    <button class="accion-btn" onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="color:var(--danger)">🗑</button>
   </div>`;
 }
+// UI optimista: se desmarca de inmediato en pantalla (no espera al
+// backend, y mucho menos a un refreshData() completo) — antes se veía
+// "tardado o que no palomeaba" porque esperaba TRES viajes de red (getAll +
+// inventario + lista) solo para reflejar un click; si alguno tardaba o
+// fallaba entregando la respuesta (ver conversación — la entrega de Google
+// tras la redirección puede tardar o fallar aunque el guardado ya haya
+// pasado), la casilla se quedaba viéndose como si nada hubiera pasado
+// aunque sí se hubiera guardado.
 async function desmarcarComprado(id){
+  const item = findCompra(id); if(!item) return;
+  item.Comprado = false;
+  renderCompras();
   const r = await apiPost('actualizarCompradoListaGastos', { sesion: gastosSesion, pass: gastosPass, id, comprado: false });
-  if(!r.ok){ showToast('No se pudo desmarcar: '+(r.error||'sin conexión')); return; }
-  await refreshData();
+  if(!r.ok){ item.Comprado = true; renderCompras(); showToast('No se pudo desmarcar: '+(r.error||'sin conexión')); return; }
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
 }
 // Comparar un precio que viste (en la tienda, un anuncio…) SIN comprarlo
 // todavía ni tocar el inventario — solo lectura, no se guarda nada.
@@ -1738,9 +1751,23 @@ async function confirmarCompra(id){
     tienda: document.getElementById('mcTienda').value, precio: document.getElementById('mcPrecio').value,
     fechaCaducidad: document.getElementById('mcCaducidad').value
   };
-  const r = await apiPost('marcarCompradoGastos', body);
-  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Confirmar compra'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  // UI optimista: se marca y se cierra el modal DE INMEDIATO — lo pesado
+  // (crear el ingrediente en inventario, comparar el precio) sigue en
+  // segundo plano. Antes esto esperaba a un refreshData() completo (3
+  // viajes de red) antes de que la casilla se viera marcada — si la
+  // entrega de Google tardaba, la fila se quedaba viéndose sin marcar, y
+  // un segundo tap de impaciencia caía sobre otro botón porque la fila
+  // podía reordenarse (pasa de pendientes a comprados) justo en ese
+  // momento — eso explica el "se abrió el histórico por accidente".
+  i.Comprado = true;
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCompras();
+  const r = await apiPost('marcarCompradoGastos', body);
+  if(!r.ok){
+    i.Comprado = false; renderCompras();
+    showToast('No se pudo guardar: '+(r.error||'sin conexión'));
+    return;
+  }
   await refreshData();
   const b = precioBadgeTexto(r.comparacion);
   showToast('✓ Agregado a tus ingredientes' + (r.comparacion && r.comparacion.estado!=='sinHistorial' ? ' — '+b.txt : ''));
