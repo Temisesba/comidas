@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chetumal';
+const BUILD_VERSION = 'Campeche2';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -483,15 +483,16 @@ async function refreshData(){
 }
 // Ingredientes y Lista de compras NO vienen de getAll — viven en el Sheet
 // de Gastos y necesitan la sesión+contraseña elegidas en Configuración.
+// Un solo viaje de red para las dos cosas (antes eran 2 en paralelo con
+// Promise.all — además de más tráfico, dos ejecuciones de Apps Script AL
+// MISMO TIEMPO puede chocar con el límite de ejecuciones simultáneas de
+// un Web App anónimo, que es justo el patrón que coincidía con los 404
+// intermitentes).
 async function cargarInventarioYListaDeGastos(){
   if(!gastosSesion){ DATA.inventario = []; DATA.lista_compras = []; return; }
-  const [rInv, rLista] = await Promise.all([
-    apiPost('getInventarioGastos', { sesion: gastosSesion, pass: gastosPass }),
-    apiPost('getListaComprasGastos', { sesion: gastosSesion, pass: gastosPass })
-  ]);
-  if(rInv && rInv.ok) DATA.inventario = rInv.items;
-  else if(rInv && rInv.error==='PASSWORD') showToast('La contraseña de la sesión de Gastos ya no es válida — vincúlala de nuevo en Configuración');
-  if(rLista && rLista.ok) DATA.lista_compras = rLista.items;
+  const r = await apiPost('getDatosGastosCompartidos', { sesion: gastosSesion, pass: gastosPass });
+  if(r && r.ok){ DATA.inventario = r.items; DATA.lista_compras = r.listaItems; }
+  else if(r && r.error==='PASSWORD') showToast('La contraseña de la sesión de Gastos ya no es válida — vincúlala de nuevo en Configuración');
   localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
 }
 function renderAllScreens(){
