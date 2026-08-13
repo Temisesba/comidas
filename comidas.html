@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Comidas — recetas y despensa</title>
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#c0632b">
+<meta name="theme-color" content="#4f9d5c">
 <style>
 :root{
   --bg:#faf6f0; --bg-card:#ffffff; --text:#2c2622; --text-soft:#7a726a;
-  --accent:#c0632b; --accent-soft:#f3ddce; --border:#ece2d6;
+  --accent:#4f9d5c; --accent-soft:#dcefdf; --border:#ece2d6;
   --danger:#c0392b; --danger-soft:#f6dcd8; --success:#2f7a4f; --success-soft:#dcefe2;
   --warn:#b8860b; --warn-soft:#f5ecd2;
   --radius:14px; --shadow:0 2px 10px rgba(60,40,25,.08);
 }
 @media (prefers-color-scheme: dark){
-  :root{ --bg:#211d1a; --bg-card:#2b2521; --text:#f1e8de; --text-soft:#b0a595; --accent:#e08a54; --accent-soft:#3c2e23; --border:#453a30; --danger-soft:#4a2724; --success-soft:#1f3a2a; --warn-soft:#3a3320; }
+  :root{ --bg:#211d1a; --bg-card:#2b2521; --text:#f1e8de; --text-soft:#b0a595; --accent:#7fcf8c; --accent-soft:#22392a; --border:#453a30; --danger-soft:#4a2724; --success-soft:#1f3a2a; --warn-soft:#3a3320; }
 }
 *{box-sizing:border-box}
 body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);padding-bottom:76px}
@@ -202,9 +202,10 @@ nav.tabbar button .ic{font-size:18px}
     </div>
 
     <div id="screen-inventario" class="screen">
-      <h2>🧺 Inventario</h2>
+      <h2>🥕 Ingredientes</h2>
+      <div class="searchbar"><input type="text" id="ingredientesBuscar" placeholder="Buscar ingrediente…" oninput="renderInventario()"></div>
       <div id="inventarioLista"></div>
-      <button class="btn block" style="margin-top:14px" onclick="abrirEditorInventario(null)">➕ Agregar al inventario</button>
+      <button class="btn block" style="margin-top:14px" onclick="abrirEditorInventario(null)">➕ Agregar ingrediente</button>
     </div>
 
     <div id="screen-compras" class="screen">
@@ -270,7 +271,7 @@ nav.tabbar button .ic{font-size:18px}
   <nav class="tabbar">
     <button data-tab="inicio" onclick="switchTab('inicio')"><span class="ic">🏠</span>Inicio</button>
     <button data-tab="recetas" onclick="switchTab('recetas')"><span class="ic">📖</span>Recetas</button>
-    <button data-tab="inventario" onclick="switchTab('inventario')"><span class="ic">🧺</span>Inventario</button>
+    <button data-tab="inventario" onclick="switchTab('inventario')"><span class="ic">🥕</span>Ingredientes</button>
     <button data-tab="compras" onclick="switchTab('compras')"><span class="ic">🛒</span>Compras</button>
     <button data-tab="calendario" onclick="switchTab('calendario')"><span class="ic">📅</span>Calendario</button>
     <button data-tab="config" onclick="switchTab('config')"><span class="ic">⚙️</span>Config</button>
@@ -848,7 +849,7 @@ function renderInicio(){
       <div class="titulo">${escAttr(r.Nombre)}</div>
       <div class="meta">${m.pct}% de los ingredientes ${m.pct===100?'— ¡ya la puedes hacer!':''} ${m.faltan.length?('· falta: '+m.faltan.map(i=>i.nombre).join(', ')):''}</div>
     </div></div>`
-  ).join('') : `<p class="hint">Agrega recetas e inventario para ver sugerencias aquí.</p>`);
+  ).join('') : `<p class="hint">Agrega recetas e ingredientes para ver sugerencias aquí.</p>`);
 }
 async function pedirIdeaIA(){
   const btn = document.getElementById('btnIdeaIA');
@@ -1175,7 +1176,7 @@ function abrirCocinarModal(recetaId){
       <input type="file" accept="image/*" multiple id="cocFotoInput" onchange="subirVariasFotosDesdeInput(this.files,'cocFotoCrop', url=>{ cocinarFotos.push(url); renderCocinarFotos(); })">
       <div id="cocFotoCrop"></div>
     </div>
-    ${ings.length ? `<label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="cocDescontar" style="width:auto" checked> 📉 Descontar ingredientes del inventario</label>` : ''}
+    ${ings.length ? `<label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="cocDescontar" style="width:auto" checked> 📉 Descontar de mis ingredientes</label>` : ''}
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
       <button class="btn" id="cocGuardarBtn" onclick="guardarCocinado('${recetaId}')">💾 Guardar</button>
@@ -1219,42 +1220,105 @@ async function guardarCocinado(recetaId){
 }
 
 // ============================================================
-//  INVENTARIO
+//  INGREDIENTES (lo que tienes en stock + lo que usan tus recetas)
 // ============================================================
+// Nombres de ingrediente que aparecen en al menos una receta pero NO
+// tienen ninguna fila de inventario que los cubra — "te faltan pero ya
+// sabes en qué platillo entrarían" — pedido explícito del usuario: que
+// también aparezcan aquí, no solo lo que ya tienes comprado.
+function ingredientesSinStock(){
+  const stockNorm = new Set(activos(DATA.inventario).map(f=>normalizarNombre(f.Nombre)));
+  const vistos = new Map();
+  activos(DATA.recetas).forEach(r=>{
+    parseIngredientes(r.IngredientesJSON).forEach(ing=>{
+      const norm = normalizarNombre(ing.nombre);
+      if(!norm || stockNorm.has(norm) || vistos.has(norm)) return;
+      vistos.set(norm, ing.nombre);
+    });
+  });
+  return Array.from(vistos.entries()).map(([norm,nombre])=>({norm,nombre}));
+}
 function renderInventario(){
   if(!usuarioActivo) return;
-  const lista = activos(DATA.inventario);
+  const qEl = document.getElementById('ingredientesBuscar');
+  const q = normalizarNombre(qEl?qEl.value:'');
+  let lista = activos(DATA.inventario);
+  if(q) lista = lista.filter(f=>normalizarNombre(f.Nombre).includes(q));
+  let sinStock = ingredientesSinStock();
+  if(q) sinStock = sinStock.filter(x=>x.norm.includes(q));
   const cont = document.getElementById('inventarioLista');
-  if(!lista.length){ cont.innerHTML = '<p class="hint">Tu inventario está vacío.</p>'; return; }
-  const grupos = {};
-  lista.forEach(f=>{ const cat = f.Categoria||'Sin categoría'; (grupos[cat]=grupos[cat]||[]).push(f); });
-  const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
-  const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
-  cont.innerHTML = catsPresentes.map(cat=>{
-    const filas = grupos[cat].sort((a,b)=>(diasHasta(a.FechaCaducidad)??9999)-(diasHasta(b.FechaCaducidad)??9999));
-    return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + filas.map(f=>{
-      const u = urgenciaCaducidad(f.FechaCaducidad);
-      const d = diasHasta(f.FechaCaducidad);
-      const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
-      return `<div class="inv-item ${u}">
+  if(!lista.length && !sinStock.length){
+    cont.innerHTML = q ? '<p class="hint">Ningún ingrediente coincide con esa búsqueda.</p>' : '<p class="hint">Todavía no tienes ingredientes — agrégalos aquí o ve creando recetas.</p>';
+    return;
+  }
+  let html = '';
+  if(lista.length){
+    const grupos = {};
+    lista.forEach(f=>{ const cat = f.Categoria||'Sin categoría'; (grupos[cat]=grupos[cat]||[]).push(f); });
+    const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
+    const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
+    html += catsPresentes.map(cat=>{
+      const filas = grupos[cat].sort((a,b)=>(diasHasta(a.FechaCaducidad)??9999)-(diasHasta(b.FechaCaducidad)??9999));
+      return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + filas.map(f=>{
+        const u = urgenciaCaducidad(f.FechaCaducidad);
+        const d = diasHasta(f.FechaCaducidad);
+        const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
+        return `<div class="inv-item ${u}">
+          <div class="info">
+            <div class="nombre">${escAttr(f.Nombre)} ${esVerdadero(f.Privado)?'🔒':''}</div>
+            <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}</div>
+          </div>
+          <div class="acciones">
+            <button onclick="abrirRecetasConIngrediente('${escAttr(f.Nombre)}')" title="Ver recetas con este ingrediente">🍽</button>
+            <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
+            <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
+            <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
+          </div>
+        </div>`;
+      }).join('');
+    }).join('');
+  }
+  if(sinStock.length){
+    html += `<div class="grupo-titulo">📋 Usados en tus recetas (sin stock)</div>` + sinStock.map(x=>`
+      <div class="inv-item">
         <div class="info">
-          <div class="nombre">${escAttr(f.Nombre)} ${esVerdadero(f.Privado)?'🔒':''}</div>
-          <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}</div>
+          <div class="nombre">${escAttr(x.nombre)}</div>
+          <div class="meta"><span class="badge falta">✗ no tienes</span></div>
         </div>
         <div class="acciones">
-          <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
-          <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
-          <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
+          <button onclick="abrirRecetasConIngrediente('${escAttr(x.nombre)}')" title="Ver recetas con este ingrediente">🍽</button>
+          <button onclick="abrirEditorInventarioConNombre('${escAttr(x.nombre)}')" title="Agregar a mis ingredientes">➕</button>
         </div>
+      </div>`).join('');
+  }
+  cont.innerHTML = html;
+}
+function abrirEditorInventarioConNombre(nombre){
+  abrirEditorInventario(null);
+  const el = document.getElementById('ivNombre');
+  if(el) el.value = nombre;
+}
+// "voy a Ingredientes, busco carne de res y veo todos los platillos que
+// se hacen con ella" — búsqueda inversa: de un ingrediente a sus recetas.
+function abrirRecetasConIngrediente(nombre){
+  const norm = normalizarNombre(nombre);
+  const recetas = activos(DATA.recetas).filter(r=>parseIngredientes(r.IngredientesJSON).some(i=>normalizarNombre(i.nombre)===norm));
+  const html = `<h3>🍽 Recetas con "${escAttr(nombre)}"</h3>` +
+    (recetas.length ? recetas.map(r=>{
+      const m = matchReceta(r);
+      return `<div class="card" style="cursor:pointer" onclick="cerrarModalYAbrir(()=>abrirRecetaDetalle('${r.ID}'))">
+        ${r.FotoURL ? `<img class="thumb" src="${r.FotoURL}">` : `<div class="thumb ph">${catEmoji(r.Categoria)}</div>`}
+        <div class="body"><div class="titulo">${escAttr(r.Nombre)}</div><div class="meta">${m.pct}% de ingredientes disponibles</div></div>
       </div>`;
-    }).join('');
-  }).join('');
+    }).join('') : '<p class="hint">Ninguna receta usa este ingrediente todavía.</p>') +
+    `<div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
 }
 function findInventario(id){ return DATA.inventario.find(f=>f.ID===id); }
 function abrirEditorInventario(id){
   const f = id ? findInventario(id) : null;
   const html = `
-    <h3>${f?'✏️ Editar item':'➕ Agregar al inventario'}</h3>
+    <h3>${f?'✏️ Editar ingrediente':'➕ Agregar ingrediente'}</h3>
     <div class="field"><label>Nombre</label><input type="text" id="ivNombre" value="${escAttr(f?f.Nombre:'')}"></div>
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('ivCategoria', f?f.Categoria:'')}</div>
     <div class="field-row">
@@ -1450,7 +1514,7 @@ async function confirmarCompra(id){
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   await refreshData();
   const b = precioBadgeTexto(r.comparacion);
-  showToast('✓ Agregado al inventario' + (r.comparacion && r.comparacion.estado!=='sinHistorial' ? ' — '+b.txt : ''));
+  showToast('✓ Agregado a tus ingredientes' + (r.comparacion && r.comparacion.estado!=='sinHistorial' ? ' — '+b.txt : ''));
 }
 async function limpiarComprados(){
   const comprados = activos(DATA.lista_compras).filter(i=>esVerdadero(i.Comprado));
@@ -1718,6 +1782,7 @@ function limpiarNotas(){
   confirmarEliminar('Se van a borrar todas las notas.', ()=>{ ta.value=''; guardarNotasConfig(); });
 }
 
+const NOMBRE_TABLA_PAPELERA = { RECETAS:'receta', INVENTARIO:'ingrediente', LISTA_COMPRAS:'lista de compras', USUARIOS:'usuario', CALENDARIO:'calendario' };
 function renderPapeleraConfig(){
   const items = [];
   DATA.recetas.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'RECETAS', nombre:r.Nombre, row:r}));
@@ -1731,7 +1796,7 @@ function renderPapeleraConfig(){
   const cont = document.getElementById('cfgPapelera');
   if(!items.length){ cont.innerHTML = '<p class="hint">La papelera está vacía.</p>'; return; }
   cont.innerHTML = items.map(it=>`<div class="userlist-row">
-    <span class="nombre">${escAttr(it.nombre)} <span class="hint">(${it.tabla.toLowerCase()})</span></span>
+    <span class="nombre">${escAttr(it.nombre)} <span class="hint">(${NOMBRE_TABLA_PAPELERA[it.tabla]||it.tabla.toLowerCase()})</span></span>
     <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="restaurarPapelera('${it.tabla}','${it.row.ID}')">♻️</button>
     <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="borrarParaSiempre('${it.tabla}','${it.row.ID}')">🗑</button>
   </div>`).join('');
