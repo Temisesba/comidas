@@ -294,7 +294,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Puebla';
+const BUILD_VERSION = 'Queretaro';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -401,10 +401,10 @@ function cambiarUrlBackend(){
 async function mostrarSelectorSesionGastos(){
   const cont = document.getElementById('cfgGastosLista');
   cont.innerHTML = '<p class="hint">Buscando tus sesiones de Gastos…</p>';
-  const r = await apiPost('listarSesionesGastos', {});
+  const r = await apiPost('listarSesionesGastos', { nombreUsuario: usuarioActivo?usuarioActivo.Nombre:'' });
   if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo conectar con Gastos: ${escAttr(r.error||'sin conexión')}</p>`; return; }
   cont.innerHTML = r.sesiones.map(s=>
-    `<button class="btn ghost block" style="margin-top:6px;text-align:left" onclick="elegirSesionGastos('${escAttr(s.sesion)}',${s.tienePassword})">${escAttr(s.sesion)} ${s.tienePassword?'🔒':''}</button>`
+    `<button class="btn ghost block" style="margin-top:6px;text-align:left" onclick="elegirSesionGastos('${escAttr(s.sesion)}',${s.tienePassword})">${s.personal?('👤 Personal ('+escAttr(s.sesion.replace('Personal-',''))+')'):(escAttr(s.sesion)+' '+(s.tienePassword?'🔒':''))}</button>`
   ).join('');
 }
 function elegirSesionGastos(sesion, tienePassword){
@@ -917,9 +917,10 @@ function renderInicio(){
   ).join('') : `<p class="hint">Agrega recetas e ingredientes para ver sugerencias aquí.</p>`);
 }
 async function pedirIdeaIA(){
+  if(!gastosSesion){ showToast('Vincula tu sesión de Gastos en Configuración primero'); return; }
   const btn = document.getElementById('btnIdeaIA');
   btn.disabled = true; btn.textContent = 'Pensando…';
-  const r = await apiPost('sugerirIdea', { usuario: usuarioActivo.ID });
+  const r = await apiPost('sugerirIdea', { sesion: gastosSesion, pass: gastosPass });
   btn.disabled = false; btn.textContent = '💡 Dame una idea';
   const cont = document.getElementById('ideaResultado');
   if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo generar una idea: ${escAttr(r.error||'sin conexión')}</p>`; return; }
@@ -1096,13 +1097,21 @@ function abrirEditorReceta(id){
   const html = `
     <h3>${r?'✏️ Editar receta':'➕ Nueva receta'}</h3>
     <div class="field">
-      <button type="button" class="btn ghost" onclick="document.getElementById('pegarRecetaBox').classList.toggle('hidden')">📋 Pegar receta completa (rápido)</button>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" class="btn ghost" onclick="document.getElementById('pegarRecetaBox').classList.toggle('hidden')">📋 Pegar receta completa (rápido)</button>
+        <button type="button" class="btn ghost" onclick="mostrarFormatoPegado()" title="Ver el formato para copiar y pedírselo a una IA de afuera">💡 Ver formato</button>
+      </div>
       <div id="pegarRecetaBox" class="hidden" style="margin-top:8px">
+        <p class="hint">Pega texto YA en el formato de abajo — se llena solo, sin usar IA de la app.</p>
         <textarea id="pegarRecetaTexto" rows="7" placeholder="Pega aquí el texto ya formateado (ver formato)…"></textarea>
         <button type="button" class="btn secondary" style="margin-top:6px" onclick="convertirRecetaPegada()">✨ Convertir y llenar el formulario</button>
       </div>
     </div>
     <div class="field"><label>Nombre</label><input type="text" id="edNombre" value="${escAttr(r?r.Nombre:'')}"></div>
+    <div class="field">
+      <button type="button" class="btn secondary" id="edSugerirBtn" onclick="sugerirRecetaIA()">✨ Sugerir con IA</button>
+      <p class="hint" style="margin-top:4px">Escribe solo el nombre y dale click para que la IA invente ingredientes y pasos — o ya llena algo tú y la IA completa/ajusta el resto.</p>
+    </div>
     <div class="field-row">
       <div class="field"><label>Categoría</label>${selectCategoriasHtml('edCategoria', r?r.Categoria:'')}</div>
       <div class="field"><label>Tiempo (min)</label><input type="number" id="edTiempo" value="${r?escAttr(r.TiempoMin):''}"></div>
@@ -1191,6 +1200,52 @@ function convertirRecetaPegada(){
   document.getElementById('pegarRecetaBox').classList.add('hidden');
   document.getElementById('pegarRecetaTexto').value = '';
   showToast('✓ Convertido — revisa y ajusta antes de guardar');
+}
+// El mismo formato de "Pegar receta completa", como texto listo para
+// copiar y pedírselo a una IA de afuera (ChatGPT, Gemini, etc.) — pedido
+// explícito: no todo pasa por la IA de la app, esto es solo referencia.
+function mostrarFormatoPegado(){
+  const catsEjemplo = categoriasOrdenadas().slice(0,3).map(c=>c.Nombre).join(', ') || 'Comida';
+  const formato = 'NOMBRE: <nombre de la receta>\n' +
+    'CATEGORIA: <una de tus categorías, ej: '+catsEjemplo+'>\n' +
+    'TIEMPO: <minutos, solo número>\n' +
+    'PORCIONES: <número>\n\n' +
+    'INGREDIENTES:\n' +
+    '<ingrediente> - <cantidad> - <unidad> - <nota opcional>\n' +
+    '<ingrediente> - <cantidad> - <unidad> - <nota opcional>\n\n' +
+    'PASOS:\n' +
+    '<paso 1>\n' +
+    '<paso 2>';
+  const html = `<h3>💡 Formato para pegar recetas</h3>
+    <p class="hint">Copia esto y pídele a tu IA de preferencia: "dame esta receta en este formato exacto" (pegando la receta que quieras convertir). Luego pega el resultado en el cuadro "📋 Pegar receta completa" — se llena solo, sin gastar créditos de la IA de la app.</p>
+    <textarea readonly rows="13" id="formatoTexto" style="font-family:monospace;font-size:12px">${escAttr(formato)}</textarea>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
+      <button class="btn" onclick="navigator.clipboard.writeText(document.getElementById('formatoTexto').value).then(()=>showToast('Formato copiado')).catch(()=>showToast('No se pudo copiar'))">📋 Copiar formato</button>
+    </div>`;
+  abrirModal(html);
+}
+// "✨ Sugerir con IA" — con solo el nombre, la IA inventa toda la receta;
+// si ya hay ingredientes/pasos escritos a mano, se mandan como contexto
+// para que la IA los complete/ajuste en vez de ignorarlos.
+async function sugerirRecetaIA(){
+  const nombre = document.getElementById('edNombre').value.trim();
+  if(!nombre){ showToast('Escribe al menos el nombre de la receta'); return; }
+  const btn = document.getElementById('edSugerirBtn');
+  btn.disabled = true; btn.textContent = 'Pensando…';
+  const ingsTexto = editorIngredientes.filter(i=>i.nombre.trim()).map(i=>[i.nombre,i.cantidad,i.unidad].filter(Boolean).join(' ')).join(', ');
+  const pasosTexto = document.getElementById('edPasos').value.trim();
+  const contexto = [ingsTexto?('Ingredientes que ya tengo: '+ingsTexto):'', pasosTexto?('Pasos que ya tengo: '+pasosTexto):''].filter(Boolean).join('\n');
+  const r = await apiPost('sugerirRecetaDesdeNombre', { nombre, contexto });
+  btn.disabled = false; btn.textContent = '✨ Sugerir con IA';
+  if(!r.ok){ showToast('No se pudo sugerir: '+(r.error||'sin conexión')); return; }
+  const idea = r.idea || {};
+  if(idea.tiempoMin) document.getElementById('edTiempo').value = idea.tiempoMin;
+  if(idea.porciones) document.getElementById('edPorciones').value = idea.porciones;
+  if(idea.pasos && idea.pasos.length) document.getElementById('edPasos').value = idea.pasos.join('\n');
+  if(idea.ingredientes && idea.ingredientes.length) editorIngredientes = idea.ingredientes;
+  renderEditorIngredientes();
+  showToast('🤖 '+mensajeModelo(r,'Sugerido'));
 }
 async function guardarReceta(id){
   const nombre = document.getElementById('edNombre').value.trim();
@@ -1324,18 +1379,19 @@ function renderInventario(){
     const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
     const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
     html += catsPresentes.map(cat=>{
-      const filas = grupos[cat].sort((a,b)=>(diasHasta(a.FechaCaducidad)??9999)-(diasHasta(b.FechaCaducidad)??9999));
+      const filas = grupos[cat].sort((a,b)=>a.Nombre.localeCompare(b.Nombre,'es'));
       return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + filas.map(f=>{
         const u = urgenciaCaducidad(f.FechaCaducidad);
         const d = diasHasta(f.FechaCaducidad);
         const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
         return `<div class="inv-item ${u}">
           <div class="info">
-            <div class="nombre">${escAttr(f.Nombre)}</div>
-            <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}</div>
+            <div class="nombre">${escAttr(f.Nombre)}${f.Marca?(' <span class="hint">'+escAttr(f.Marca)+'</span>'):''}</div>
+            <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Piezas?(' × '+escAttr(f.Piezas)):''}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}${f.Precio?(' · '+fmtMoneda(f.Precio)):''}</div>
           </div>
           <div class="acciones">
             <button onclick="abrirRecetasConIngrediente('${escAttr(f.Nombre)}')" title="Ver recetas con este ingrediente">🍽</button>
+            <button onclick="abrirHistoricoPrecio('${escAttr(f.Nombre)}')" title="Histórico de precio">📈</button>
             <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
             <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
             <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
@@ -1385,11 +1441,20 @@ function abrirEditorInventario(id){
   const f = id ? findInventario(id) : null;
   const html = `
     <h3>${f?'✏️ Editar ingrediente':'➕ Agregar ingrediente'}</h3>
+    <div class="field"><label>Código de barras</label>
+      <div style="display:flex;gap:6px">
+        <input type="text" id="ivCodigo" value="${f?escAttr(f.Codigo):''}" style="flex:1">
+        <button type="button" class="btn ghost" onclick="escanearCodigoIngrediente()" title="Escanear con la cámara">📷</button>
+      </div>
+      <div class="hint" id="ivCodigoEstado" style="margin-top:4px"></div>
+    </div>
     <div class="field"><label>Nombre</label><input type="text" id="ivNombre" value="${escAttr(f?f.Nombre:'')}"></div>
+    <div class="field"><label>Marca (opcional)</label><input type="text" id="ivMarca" value="${f?escAttr(f.Marca):''}"></div>
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('ivCategoria', f?f.Categoria:'')}</div>
     <div class="field-row">
       <div class="field"><label>Cantidad</label><input type="text" id="ivCantidad" value="${f?escAttr(f.Cantidad):''}"></div>
       <div class="field"><label>Unidad</label><input type="text" id="ivUnidad" placeholder="kg, pza, l…" value="${f?escAttr(f.Unidad):''}"></div>
+      <div class="field"><label>Piezas</label><input type="text" id="ivPiezas" value="${f?escAttr(f.Piezas):''}"></div>
     </div>
     <div class="field"><label>Caduca</label><input type="date" id="ivCaducidad" value="${f?escAttr(f.FechaCaducidad):''}"></div>
     <div class="field"><label>Tienda</label><input type="text" id="ivTienda" value="${f?escAttr(f.Tienda):''}"></div>
@@ -1399,6 +1464,58 @@ function abrirEditorInventario(id){
     </div>`;
   abrirModal(html, {confirmarCierre:true});
 }
+// 📷 Código de barras — mismo BarcodeDetector nativo (Chrome/Android) que
+// ya usa Gastos, sin librerías externas. Si el código ya existe en el
+// inventario, prellena Nombre/Marca/Categoría/Unidad (evita re-teclear un
+// producto que ya se había capturado antes).
+async function escanearCodigoIngrediente(){
+  const estado = document.getElementById('ivCodigoEstado');
+  if(!('BarcodeDetector' in window)){ estado.textContent = '⚠️ Este navegador no soporta escanear — escribe el código a mano.'; return; }
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    const video = document.createElement('video');
+    video.srcObject = stream; video.setAttribute('playsinline','');
+    await video.play();
+    estado.textContent = '📷 Apunta al código de barras…';
+    const detector = new BarcodeDetector({ formats: ['ean_13','ean_8','upc_a','upc_e','code_128'] });
+    const limite = Date.now() + 15000;
+    let encontrado = null;
+    while(Date.now() < limite && !encontrado){
+      try{ const codigos = await detector.detect(video); if(codigos.length) encontrado = codigos[0].rawValue; }catch(e){}
+      if(!encontrado) await new Promise(r=>setTimeout(r,300));
+    }
+    stream.getTracks().forEach(t=>t.stop());
+    if(!encontrado){ estado.textContent = 'No se detectó ningún código — intenta de nuevo o escríbelo a mano.'; return; }
+    document.getElementById('ivCodigo').value = encontrado;
+    estado.textContent = 'Buscando si ya lo conoces…';
+    const r = await apiPost('buscarPorCodigoGastos', { sesion: gastosSesion, pass: gastosPass, codigo: encontrado });
+    if(r.ok && r.encontrado){
+      document.getElementById('ivNombre').value = r.encontrado.Nombre;
+      document.getElementById('ivMarca').value = r.encontrado.Marca;
+      document.getElementById('ivUnidad').value = r.encontrado.Unidad;
+      if(r.encontrado.Categoria){ const sel = document.getElementById('ivCategoria'); const m = Array.from(sel.options).find(o=>o.value===r.encontrado.Categoria); if(m) sel.value = m.value; }
+      estado.textContent = '✓ Ya lo conocías — se prellenó';
+    } else {
+      estado.textContent = '✓ Código guardado — es nuevo, llena el resto a mano';
+    }
+  }catch(e){
+    estado.textContent = 'No se pudo abrir la cámara: '+(e.message||'sin permiso');
+  }
+}
+function abrirHistoricoPrecio(nombre){
+  const html = `<h3>📈 Histórico de precio: ${escAttr(nombre)}</h3><div id="historicoPrecioCont"><p class="hint">Cargando…</p></div>
+    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
+  cargarHistoricoPrecio(nombre);
+}
+async function cargarHistoricoPrecio(nombre){
+  const cont = document.getElementById('historicoPrecioCont');
+  const r = await apiPost('historicoPrecioGastos', { sesion: gastosSesion, pass: gastosPass, item: nombre });
+  if(!cont) return;
+  if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo cargar: ${escAttr(r.error||'sin conexión')}</p>`; return; }
+  if(!r.historial.length){ cont.innerHTML = '<p class="hint">Todavía no hay precios registrados para este ingrediente.</p>'; return; }
+  cont.innerHTML = r.historial.map(h=>`<div class="ing-row"><span class="nombre">${fmtFecha(h.fecha)}${h.tienda?(' · '+escAttr(h.tienda)):''}</span><span class="cant">${fmtMoneda(h.precio)}</span></div>`).join('');
+}
 async function guardarInventario(id){
   const nombre = document.getElementById('ivNombre').value.trim();
   if(!nombre){ showToast('Falta el nombre'); return; }
@@ -1407,7 +1524,9 @@ async function guardarInventario(id){
   const row = {
     ID: id || '', Nombre: nombre, Categoria: document.getElementById('ivCategoria').value,
     Cantidad: document.getElementById('ivCantidad').value, Unidad: document.getElementById('ivUnidad').value,
-    FechaCaducidad: document.getElementById('ivCaducidad').value, Tienda: document.getElementById('ivTienda').value
+    FechaCaducidad: document.getElementById('ivCaducidad').value, Tienda: document.getElementById('ivTienda').value,
+    Marca: document.getElementById('ivMarca').value, Codigo: document.getElementById('ivCodigo').value,
+    Piezas: document.getElementById('ivPiezas').value
   };
   const r = await apiPost('guardarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
