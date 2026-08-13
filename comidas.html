@@ -878,18 +878,53 @@ function abrirRecetaDetalle(id){
     <h3 style="margin-top:14px">Ingredientes</h3>
     ${ings.map(i=>{ const m = tieneIngrediente(i); return `<div class="ing-row"><span class="nombre">${escAttr(i.nombre)}</span><span class="cant">${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</span><span class="badge ${m.tiene?'tiene':'falta'}">${m.tiene?'✓ lo tienes':'✗ te falta'}</span></div>`; }).join('') || '<p class="hint">Sin ingredientes cargados</p>'}
     ${faltantes.length ? `<button class="btn secondary" style="margin-top:8px" onclick="agregarFaltantesALista('${id}')">🛒 Agregar faltantes a la lista</button>` : ''}
-    <h3 style="margin-top:14px">Pasos</h3>
-    <ol style="padding-left:18px">${(r.Pasos||'').split('\n').filter(Boolean).map(p=>`<li>${escAttr(p)}</li>`).join('') || '<p class="hint">Sin pasos cargados</p>'}</ol>
+    <h3 style="margin-top:14px">Pasos <span class="hint" id="pasosProgreso"></span> <button type="button" class="btn ghost" style="font-size:11px;padding:4px 8px" onclick="reiniciarPasos('${id}')">🔄 Reiniciar</button></h3>
+    <div id="pasosLista"></div>
     <div class="actions" style="justify-content:flex-start">
       <button class="btn" onclick="abrirCocinarModal('${id}')">🍳 Cocinar ahora</button>
       <button class="btn ghost" onclick="toggleFavoritoReceta('${id}')">${esVerdadero(r.Favorito)?'⭐ Quitar de favoritas':'☆ Marcar favorita'}</button>
       <button class="btn ghost" onclick="cerrarModalYAbrir(()=>abrirEditorReceta('${id}'))">✏️ Editar</button>
       <button class="btn danger" onclick="pedirEliminarReceta('${id}')">🗑 Eliminar</button>
     </div>
-    <h3 style="margin-top:14px">Historial (${hist.length} vez${hist.length===1?'':'ces'} cocinada)</h3>
+    <h3 style="margin-top:14px">Historial (${hist.length} ${hist.length===1?'vez':'veces'} cocinada)</h3>
     <div id="recetaHistorialCont">${renderHistorialHtml(hist)}</div>
     <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
   abrirModal(html);
+  renderPasosChecklist(id);
+}
+// Progreso de pasos al cocinar — se guarda por receta en localStorage (no
+// en el backend: es solo una ayuda visual local mientras cocinas, no algo
+// que otros usuarios necesiten ver ni que deba conservarse para siempre).
+function pasosProgresoKey(recetaId){ return 'comidas_pasos_'+recetaId; }
+function leerPasosMarcados(recetaId){
+  try{ return JSON.parse(localStorage.getItem(pasosProgresoKey(recetaId)))||[]; }catch(e){ return []; }
+}
+function renderPasosChecklist(recetaId){
+  const r = findReceta(recetaId); if(!r) return;
+  const pasos = (r.Pasos||'').split('\n').filter(Boolean);
+  const cont = document.getElementById('pasosLista');
+  const prog = document.getElementById('pasosProgreso');
+  if(!cont) return;
+  if(!pasos.length){ cont.innerHTML = '<p class="hint">Sin pasos cargados</p>'; if(prog) prog.textContent=''; return; }
+  const marcados = leerPasosMarcados(recetaId);
+  cont.innerHTML = pasos.map((p,i)=>{
+    const on = !!marcados[i];
+    return `<div class="ing-row" style="cursor:pointer" onclick="togglePaso('${recetaId}',${i})">
+      <span style="width:22px;height:22px;flex:none;border-radius:6px;border:2px solid var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;${on?'background:var(--accent);color:#fff':''}">${on?'✓':''}</span>
+      <span class="nombre" style="${on?'text-decoration:line-through;color:var(--text-soft)':''}">${escAttr(p)}</span>
+    </div>`;
+  }).join('');
+  if(prog) prog.textContent = `(${marcados.filter(Boolean).length}/${pasos.length})`;
+}
+function togglePaso(recetaId, i){
+  const marcados = leerPasosMarcados(recetaId);
+  marcados[i] = !marcados[i];
+  localStorage.setItem(pasosProgresoKey(recetaId), JSON.stringify(marcados));
+  renderPasosChecklist(recetaId);
+}
+function reiniciarPasos(recetaId){
+  localStorage.removeItem(pasosProgresoKey(recetaId));
+  renderPasosChecklist(recetaId);
 }
 function renderHistorialHtml(hist){
   if(!hist.length) return '<p class="hint">Todavía no la has cocinado.</p>';
