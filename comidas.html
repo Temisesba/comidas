@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Durango';
+const BUILD_VERSION = 'Zacatecas2';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1135,7 +1135,7 @@ function abrirEditorReceta(id){
       <div id="pegarRecetaBox" class="hidden" style="margin-top:8px">
         <p class="hint">Pega texto YA en el formato de abajo — se llena solo, sin usar IA de la app.</p>
         <textarea id="pegarRecetaTexto" rows="7" placeholder="Pega aquí el texto ya formateado (ver formato)…"></textarea>
-        <button type="button" class="btn secondary" style="margin-top:6px" onclick="convertirRecetaPegada()">✨ Convertir y llenar el formulario</button>
+        <button type="button" class="btn secondary" style="margin-top:6px" onclick="convertirRecetaPegada()">📋 Convertir y llenar el formulario</button>
       </div>
     </div>
     <div class="field"><label>Nombre</label><input type="text" id="edNombre" value="${escAttr(r?r.Nombre:'')}"></div>
