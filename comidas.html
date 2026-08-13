@@ -106,6 +106,12 @@ nav.tabbar button .ic{font-size:18px}
 .ing-row .nombre{flex:1}
 .ing-row .cant{color:var(--text-soft);font-size:12px}
 
+.foto-strip{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin-bottom:8px}
+.foto-strip img{width:90px;height:90px;object-fit:cover;border-radius:8px;flex:none;cursor:zoom-in}
+.foto-editor-item{position:relative;flex:none}
+.foto-editor-item img{width:80px;height:80px;object-fit:cover;border-radius:8px;display:block}
+.foto-editor-item .quitar{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border:none;border-radius:50%;width:22px;height:22px;font-size:12px;line-height:1;padding:0}
+
 .estrellas{display:flex;gap:4px;font-size:24px;cursor:pointer;user-select:none}
 .estrellas span{color:var(--border)}
 .estrellas span.on{color:#e0a52b}
@@ -300,6 +306,15 @@ function normalizarNombre(t){
   return s;
 }
 function parseIngredientes(json){ try{ const a = JSON.parse(json); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+// FotosJSON es la lista completa; FotoURL es solo la portada (=fotos[0]).
+// Si por lo que sea FotosJSON viene vacío pero FotoURL sí tiene algo (no
+// debería pasar con filas nuevas, pero es un respaldo barato), se usa esa.
+function parseFotos(row){
+  let a = [];
+  try{ a = JSON.parse(row.FotosJSON); if(!Array.isArray(a)) a = []; }catch(e){ a = []; }
+  if(!a.length && row.FotoURL) a = [row.FotoURL];
+  return a;
+}
 
 // ============================================================
 //  Comunicación con el backend
@@ -567,6 +582,44 @@ async function subirFotoDesdeInput(fileList, containerId, onSubida){
       else { document.getElementById(containerId).innerHTML = ''; showToast('No se pudo subir la foto: '+(r.error||'sin conexión')); }
     }
   });
+}
+
+// Varias fotos a la vez: procesa el <input multiple> una por una (cada
+// una con su propio recorte manual antes de subir), acumulando URLs.
+// onCadaFoto(url) se llama justo cuando cada foto termina de subirse (así
+// la galería del editor se puede ir llenando en vivo), onTerminado() al
+// acabar con todas (o si no se eligió ninguna).
+async function subirVariasFotosDesdeInput(fileList, containerId, onCadaFoto, onTerminado){
+  const archivos = Array.from(fileList||[]);
+  if(!archivos.length) return;
+  let idx = 0;
+  async function siguiente(){
+    if(idx >= archivos.length){ const c = document.getElementById(containerId); if(c) c.innerHTML=''; if(onTerminado) onTerminado(); return; }
+    const resized = await resizeImageFile(archivos[idx], 1280, 0.85);
+    mostrarRecorteManual(resized, {
+      containerId,
+      onDescartar: ()=>{ idx++; siguiente(); },
+      onListo: async (recortada)=>{
+        const c = document.getElementById(containerId); if(c) c.innerHTML = `<p class="hint">Subiendo foto ${idx+1}/${archivos.length}…</p>`;
+        const r = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'comidas-'+Date.now()+'.jpg' });
+        if(r.ok) onCadaFoto(r.url);
+        else showToast('No se pudo subir una foto: '+(r.error||'sin conexión'));
+        idx++; siguiente();
+      }
+    });
+  }
+  siguiente();
+}
+// Galería horizontal de solo-lectura (detalle de receta, historial…).
+function galeriaFotosHtml(urls){
+  urls = (urls||[]).filter(Boolean);
+  if(!urls.length) return '';
+  return `<div class="foto-strip">${urls.map(u=>`<img src="${u}" onclick="verFotoGrande('${u}')">`).join('')}</div>`;
+}
+// Fotos ya elegidas en un editor (receta / cocinar) — con botón de quitar.
+function galeriaEditorHtml(urls, onQuitar){
+  urls = urls||[];
+  return `<div class="foto-strip">${urls.map((u,i)=>`<div class="foto-editor-item"><img src="${u}" onclick="verFotoGrande('${u}')"><button type="button" class="quitar" onclick="event.stopPropagation();${onQuitar}(${i})">✕</button></div>`).join('')}</div>`;
 }
 
 const NOMBRE_MODELO = { gemini:'Gemini', claude:'Claude' };
@@ -873,10 +926,10 @@ function abrirRecetaDetalle(id){
   const faltantes = ings.map(i=>({i, m:tieneIngrediente(i)})).filter(x=>!x.m.tiene);
   const html = `
     <h3>${escAttr(r.Nombre)}</h3>
-    ${r.FotoURL ? `<img src="${r.FotoURL}" style="width:100%;border-radius:10px;margin-bottom:10px;cursor:zoom-in" onclick="verFotoGrande('${r.FotoURL}')">` : ''}
+    ${galeriaFotosHtml(parseFotos(r))}
     <p class="hint">${catEmoji(r.Categoria)} ${escAttr(r.Categoria||'Sin categoría')} · ⏱ ${r.TiempoMin||'?'} min · 🍽 ${r.Porciones||'?'} porciones ${prom?(' · '+estrellasHtml(prom,true)):''}</p>
     <h3 style="margin-top:14px">Ingredientes</h3>
-    ${ings.map(i=>{ const m = tieneIngrediente(i); return `<div class="ing-row"><span class="nombre">${escAttr(i.nombre)}</span><span class="cant">${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</span><span class="badge ${m.tiene?'tiene':'falta'}">${m.tiene?'✓ lo tienes':'✗ te falta'}</span></div>`; }).join('') || '<p class="hint">Sin ingredientes cargados</p>'}
+    ${ings.map(i=>{ const m = tieneIngrediente(i); return `<div class="ing-row"><span class="nombre">${escAttr(i.nombre)}${i.nota?`<br><span class="hint" style="font-size:11px">${escAttr(i.nota)}</span>`:''}</span><span class="cant">${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</span><span class="badge ${m.tiene?'tiene':'falta'}">${m.tiene?'✓ lo tienes':'✗ te falta'}</span></div>`; }).join('') || '<p class="hint">Sin ingredientes cargados</p>'}
     ${faltantes.length ? `<button class="btn secondary" style="margin-top:8px" onclick="agregarFaltantesALista('${id}')">🛒 Agregar faltantes a la lista</button>` : ''}
     <h3 style="margin-top:14px">Pasos <span class="hint" id="pasosProgreso"></span> <button type="button" class="btn ghost" style="font-size:11px;padding:4px 8px" onclick="reiniciarPasos('${id}')">🔄 Reiniciar</button></h3>
     <div id="pasosLista"></div>
@@ -929,7 +982,7 @@ function reiniciarPasos(recetaId){
 function renderHistorialHtml(hist){
   if(!hist.length) return '<p class="hint">Todavía no la has cocinado.</p>';
   return hist.map(h=>`<div class="card"><div class="body">
-    ${h.FotoURL?`<img src="${h.FotoURL}" style="width:100%;border-radius:8px;margin-bottom:6px;cursor:zoom-in" onclick="verFotoGrande('${h.FotoURL}')">`:''}
+    ${galeriaFotosHtml(parseFotos(h))}
     <div class="meta">${fmtFecha(h.Fecha)} ${h.CocinadoPor?('· '+escAttr(h.CocinadoPor)):''}</div>
     ${h.Estrellas?estrellasHtml(h.Estrellas,true):''}
     ${h.Comentario?`<p style="margin:6px 0 0">${escAttr(h.Comentario)}</p>`:''}
@@ -973,18 +1026,26 @@ let editorIngredientes = [];
 function abrirEditorReceta(id){
   const r = id ? findReceta(id) : null;
   editorIngredientes = r ? parseIngredientes(r.IngredientesJSON) : [];
-  if(!editorIngredientes.length) editorIngredientes = [{nombre:'',cantidad:'',unidad:''}];
+  if(!editorIngredientes.length) editorIngredientes = [{nombre:'',cantidad:'',unidad:'',nota:''}];
+  editorFotos = r ? parseFotos(r) : [];
   const html = `
     <h3>${r?'✏️ Editar receta':'➕ Nueva receta'}</h3>
+    <div class="field">
+      <button type="button" class="btn ghost" onclick="document.getElementById('pegarRecetaBox').classList.toggle('hidden')">📋 Pegar receta completa (rápido)</button>
+      <div id="pegarRecetaBox" class="hidden" style="margin-top:8px">
+        <textarea id="pegarRecetaTexto" rows="7" placeholder="Pega aquí el texto ya formateado (ver formato)…"></textarea>
+        <button type="button" class="btn secondary" style="margin-top:6px" onclick="convertirRecetaPegada()">✨ Convertir y llenar el formulario</button>
+      </div>
+    </div>
     <div class="field"><label>Nombre</label><input type="text" id="edNombre" value="${escAttr(r?r.Nombre:'')}"></div>
     <div class="field-row">
       <div class="field"><label>Categoría</label>${selectCategoriasHtml('edCategoria', r?r.Categoria:'')}</div>
       <div class="field"><label>Tiempo (min)</label><input type="number" id="edTiempo" value="${r?escAttr(r.TiempoMin):''}"></div>
     </div>
     <div class="field"><label>Porciones</label><input type="number" id="edPorciones" value="${r?escAttr(r.Porciones):''}"></div>
-    <div class="field"><label>Foto</label>
-      <div id="edFotoActual">${r&&r.FotoURL?`<img src="${r.FotoURL}" style="width:100%;border-radius:8px;margin-bottom:6px">`:''}</div>
-      <input type="file" accept="image/*" id="edFotoInput" onchange="subirFotoDesdeInput(this.files,'edFotoCrop', url=>{ window._edFotoNueva=url; document.getElementById('edFotoActual').innerHTML='<img src=\\''+url+'\\' style=\\'width:100%;border-radius:8px\\'>'; document.getElementById('edFotoCrop').innerHTML=''; })">
+    <div class="field"><label>Fotos</label>
+      <div id="edFotosGaleria"></div>
+      <input type="file" accept="image/*" multiple id="edFotoInput" onchange="subirVariasFotosDesdeInput(this.files,'edFotoCrop', url=>{ editorFotos.push(url); renderEditorFotos(); })">
       <div id="edFotoCrop"></div>
     </div>
     <div class="field"><label>Ingredientes</label><div id="edIngredientes"></div>
@@ -998,18 +1059,74 @@ function abrirEditorReceta(id){
     </div>`;
   abrirModal(html, {confirmarCierre:true});
   renderEditorIngredientes();
+  renderEditorFotos();
 }
+let editorFotos = [];
+function renderEditorFotos(){
+  const el = document.getElementById('edFotosGaleria'); if(!el) return;
+  el.innerHTML = editorFotos.length ? galeriaEditorHtml(editorFotos, 'editorQuitarFoto') : '<p class="hint">Sin fotos todavía</p>';
+}
+function editorQuitarFoto(i){ editorFotos.splice(i,1); renderEditorFotos(); }
 function renderEditorIngredientes(){
   document.getElementById('edIngredientes').innerHTML = editorIngredientes.map((ing,i)=>`
-    <div class="field-row" style="margin-bottom:6px">
-      <input type="text" placeholder="Ingrediente" value="${escAttr(ing.nombre)}" oninput="editorIngredientes[${i}].nombre=this.value">
-      <input type="text" placeholder="Cant." style="max-width:70px" value="${escAttr(ing.cantidad)}" oninput="editorIngredientes[${i}].cantidad=this.value">
-      <input type="text" placeholder="Unidad" style="max-width:80px" value="${escAttr(ing.unidad)}" oninput="editorIngredientes[${i}].unidad=this.value">
-      <button type="button" class="btn ghost" onclick="editorQuitarIngrediente(${i})">✕</button>
+    <div style="margin-bottom:8px;padding-bottom:8px;border-bottom:1px solid var(--border)">
+      <div class="field-row">
+        <input type="text" placeholder="Ingrediente" value="${escAttr(ing.nombre)}" oninput="editorIngredientes[${i}].nombre=this.value">
+        <input type="text" placeholder="Cant." style="max-width:70px" value="${escAttr(ing.cantidad)}" oninput="editorIngredientes[${i}].cantidad=this.value">
+        <input type="text" placeholder="Unidad" style="max-width:80px" value="${escAttr(ing.unidad)}" oninput="editorIngredientes[${i}].unidad=this.value">
+        <button type="button" class="btn ghost" onclick="editorQuitarIngrediente(${i})">✕</button>
+      </div>
+      <input type="text" placeholder="Nota (opcional) — ej: cortado en cubos, de preferencia pulpa negra" style="margin-top:4px;font-size:12px" value="${escAttr(ing.nota||'')}" oninput="editorIngredientes[${i}].nota=this.value">
     </div>`).join('');
 }
-function editorAgregarIngrediente(){ editorIngredientes.push({nombre:'',cantidad:'',unidad:''}); renderEditorIngredientes(); }
+function editorAgregarIngrediente(){ editorIngredientes.push({nombre:'',cantidad:'',unidad:'',nota:''}); renderEditorIngredientes(); }
 function editorQuitarIngrediente(i){ editorIngredientes.splice(i,1); renderEditorIngredientes(); }
+
+// ── Pegado rápido: NOMBRE:/CATEGORIA:/TIEMPO:/PORCIONES: + secciones
+// INGREDIENTES:/PASOS: — ver formato exacto explicado al usuario. Tolerante
+// a mayúsculas/acentos en los encabezados y a líneas sin el separador " - ".
+function quitarAcentos(s){ return String(s).normalize('NFD').replace(/[̀-ͯ]/g,''); }
+function parseRecetaPegada(texto){
+  const out = { nombre:'', categoria:'', tiempoMin:'', porciones:'', ingredientes:[], pasos:[] };
+  let seccion = null;
+  String(texto).split('\n').forEach(linea=>{
+    const l = linea.trim();
+    if(!l) return;
+    const clave = quitarAcentos(l).toUpperCase();
+    if(clave.startsWith('NOMBRE:')){ out.nombre = l.slice(l.indexOf(':')+1).trim(); seccion=null; return; }
+    if(clave.startsWith('CATEGORIA:')){ out.categoria = l.slice(l.indexOf(':')+1).trim(); seccion=null; return; }
+    if(clave.startsWith('TIEMPO:')){ const n = l.match(/\d+/); out.tiempoMin = n?n[0]:''; seccion=null; return; }
+    if(clave.startsWith('PORCIONES:')){ const n = l.match(/\d+/); out.porciones = n?n[0]:''; seccion=null; return; }
+    if(clave.startsWith('INGREDIENTES')){ seccion='ing'; return; }
+    if(clave.startsWith('PASOS')){ seccion='pasos'; return; }
+    if(seccion==='ing'){
+      const partes = l.split(/\s+-\s+/).map(p=>p.trim());
+      out.ingredientes.push({ nombre: partes[0]||'', cantidad: partes[1]||'', unidad: partes[2]||'', nota: partes.slice(3).join(' - ')||'' });
+    } else if(seccion==='pasos'){
+      out.pasos.push(l.replace(/^(\d+[\.\)]|[-•*])\s*/, ''));
+    }
+  });
+  return out;
+}
+function convertirRecetaPegada(){
+  const texto = document.getElementById('pegarRecetaTexto').value;
+  if(!texto.trim()){ showToast('Pega el texto primero'); return; }
+  const p = parseRecetaPegada(texto);
+  if(p.nombre) document.getElementById('edNombre').value = p.nombre;
+  if(p.tiempoMin) document.getElementById('edTiempo').value = p.tiempoMin;
+  if(p.porciones) document.getElementById('edPorciones').value = p.porciones;
+  if(p.pasos.length) document.getElementById('edPasos').value = p.pasos.join('\n');
+  if(p.categoria){
+    const sel = document.getElementById('edCategoria');
+    const match = Array.from(sel.options).find(o=>o.value && normalizarNombre(o.value)===normalizarNombre(p.categoria));
+    if(match) sel.value = match.value;
+  }
+  if(p.ingredientes.length) editorIngredientes = p.ingredientes;
+  renderEditorIngredientes();
+  document.getElementById('pegarRecetaBox').classList.add('hidden');
+  document.getElementById('pegarRecetaTexto').value = '';
+  showToast('✓ Convertido — revisa y ajusta antes de guardar');
+}
 async function guardarReceta(id){
   const nombre = document.getElementById('edNombre').value.trim();
   if(!nombre){ showToast('Falta el nombre de la receta'); return; }
@@ -1024,7 +1141,8 @@ async function guardarReceta(id){
     Porciones: document.getElementById('edPorciones').value,
     IngredientesJSON: JSON.stringify(editorIngredientes.filter(i=>i.nombre.trim())),
     Pasos: document.getElementById('edPasos').value,
-    FotoURL: window._edFotoNueva || (anterior?anterior.FotoURL:'') || '',
+    FotoURL: editorFotos[0] || '',
+    FotosJSON: JSON.stringify(editorFotos),
     Favorito: anterior ? anterior.Favorito : false,
     Privado: document.getElementById('edPrivado').checked,
     Usuario: anterior ? anterior.Usuario : usuarioActivo.ID,
@@ -1032,7 +1150,6 @@ async function guardarReceta(id){
     Papelera: false
   };
   const r = await apiPost('saveRow', { table:'RECETAS', row });
-  window._edFotoNueva = null;
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   const idx = DATA.recetas.findIndex(x=>x.ID===row.ID);
   if(idx>=0) DATA.recetas[idx] = row; else DATA.recetas.push(row);
@@ -1047,12 +1164,17 @@ function abrirCocinarModal(recetaId){
   const r = findReceta(recetaId); if(!r) return;
   const ings = parseIngredientes(r.IngredientesJSON);
   window._cocinarEstrellas = 0;
+  cocinarFotos = [];
   const html = `
     <h3>🍳 Cocinar: ${escAttr(r.Nombre)}</h3>
     <div class="field"><label>Fecha</label><input type="date" id="cocFecha" value="${hoyLocalISO()}"></div>
     <div class="field"><label>Calificación</label><div id="cocEstrellas"></div></div>
     <div class="field"><label>Comentario</label><textarea id="cocComentario" rows="2" placeholder="¿Cómo quedó?"></textarea></div>
-    <div class="field"><label>Foto (opcional)</label><div id="cocFotoCrop"></div><input type="file" accept="image/*" id="cocFotoInput" onchange="subirFotoDesdeInput(this.files,'cocFotoCrop', url=>{ window._cocFotoUrl=url; document.getElementById('cocFotoCrop').innerHTML='<img src=\\''+url+'\\' style=\\'width:100%;border-radius:8px\\'>'; })"></div>
+    <div class="field"><label>Fotos (opcional)</label>
+      <div id="cocFotosGaleria"></div>
+      <input type="file" accept="image/*" multiple id="cocFotoInput" onchange="subirVariasFotosDesdeInput(this.files,'cocFotoCrop', url=>{ cocinarFotos.push(url); renderCocinarFotos(); })">
+      <div id="cocFotoCrop"></div>
+    </div>
     ${ings.length ? `<label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="cocDescontar" style="width:auto" checked> 📉 Descontar ingredientes del inventario</label>` : ''}
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
@@ -1060,7 +1182,14 @@ function abrirCocinarModal(recetaId){
     </div>`;
   abrirModal(html, {confirmarCierre:true});
   renderEstrellasWidget();
+  renderCocinarFotos();
 }
+let cocinarFotos = [];
+function renderCocinarFotos(){
+  const el = document.getElementById('cocFotosGaleria'); if(!el) return;
+  el.innerHTML = cocinarFotos.length ? galeriaEditorHtml(cocinarFotos, 'cocinarQuitarFoto') : '';
+}
+function cocinarQuitarFoto(i){ cocinarFotos.splice(i,1); renderCocinarFotos(); }
 function renderEstrellasWidget(){
   document.getElementById('cocEstrellas').innerHTML = `<span class="estrellas">` +
     [1,2,3,4,5].map(n=>`<span class="${n<=window._cocinarEstrellas?'on':''}" onclick="window._cocinarEstrellas=${n};renderEstrellasWidget()">★</span>`).join('') + `</span>`;
@@ -1074,12 +1203,11 @@ async function guardarCocinado(recetaId){
   const body = {
     recetaId, fecha: document.getElementById('cocFecha').value || hoyLocalISO(),
     estrellas: window._cocinarEstrellas||'', comentario: document.getElementById('cocComentario').value,
-    fotoUrl: window._cocFotoUrl||'', cocinadoPor: usuarioActivo.Nombre,
+    fotoUrl: cocinarFotos[0]||'', fotosJson: JSON.stringify(cocinarFotos), cocinadoPor: usuarioActivo.Nombre,
     descontarInventario: descontar, usuario: usuarioActivo.ID,
     ingredientes: descontar ? ings : []
   };
   const res = await apiPost('registrarCocinado', body);
-  window._cocFotoUrl = null;
   btn.disabled = false; btn.textContent = '💾 Guardar';
   if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
   DATA.recetas_historial.push(res.historial);
@@ -1349,10 +1477,17 @@ function renderCalendario(){
     const etiqueta = i===0?'Hoy':i===1?'Mañana':new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
     return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>` +
       SLOTS.map(slot=>{
-        const entry = entradas.find(e=>e.Fecha===fecha && e.Slot===slot);
-        if(!entry) return `<div class="slot-row vacio" onclick="abrirAsignarSlot('${fecha}','${slot}')"><span class="slot-nombre">${slot}</span><span class="slot-contenido hint">+ Agregar</span></div>`;
-        const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
-        return `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${slot}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
+        // Un slot (Desayuno/Comida/Cena/Snack) puede tener VARIAS entradas
+        // el mismo día — ej. Desayuno: "Bistec en su jugo" + "Agua de
+        // horchata" — así que se listan todas, y siempre queda un renglón
+        // "+ Agregar otra" al final para seguir sumando sin límite.
+        const entries = entradas.filter(e=>e.Fecha===fecha && e.Slot===slot);
+        const filas = entries.map((entry,idx)=>{
+          const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
+          return `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${idx===0?slot:''}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
+        }).join('');
+        const filaAgregar = `<div class="slot-row vacio" onclick="abrirAsignarSlot('${fecha}','${slot}')"><span class="slot-nombre">${entries.length?'':slot}</span><span class="slot-contenido hint">${entries.length?'+ Agregar otra':'+ Agregar'}</span></div>`;
+        return filas + filaAgregar;
       }).join('') + `</div>`;
   }).join('');
 }
