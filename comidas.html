@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Colima';
+const BUILD_VERSION = 'Durango';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1188,29 +1188,65 @@ function editorAgregarIngrediente(){ editorIngredientes.push({nombre:'',cantidad
 function editorQuitarIngrediente(i){ editorIngredientes.splice(i,1); renderEditorIngredientes(); }
 
 // ── Pegado rápido: NOMBRE:/CATEGORIA:/TIEMPO:/PORCIONES: + secciones
-// INGREDIENTES:/PASOS: — ver formato exacto explicado al usuario. Tolerante
-// a mayúsculas/acentos en los encabezados y a líneas sin el separador " - ".
+// INGREDIENTES:/PASOS:. Busca cada palabra clave EN CUALQUIER PARTE del
+// texto (no solo al inicio de línea) — pasa seguido que una IA externa o
+// el copy/paste de un chat colapsa los saltos de línea sencillos (solo
+// sobreviven los saltos dobles/párrafos), y NOMBRE/CATEGORIA/TIEMPO/
+// PORCIONES terminan pegados en una sola línea; con el viejo parser
+// (que exigía cada campo en su propia línea) todo eso se iba entero a
+// "nombre". Cada campo toma el texto entre su palabra clave y la
+// siguiente palabra clave encontrada.
 function quitarAcentos(s){ return String(s).normalize('NFD').replace(/[̀-ͯ]/g,''); }
+// Si INGREDIENTES/PASOS también llegan colapsados en un solo renglón (sin
+// saltos de línea entre items), se separan con reglas de respaldo en vez
+// de perder toda la lista.
+function separarIngredientesSinSaltos(blob){
+  // Cada ingrediente nuevo casi siempre empieza con Mayúscula y, unas
+  // pocas palabras después, aparece " - número" (la cantidad) — se corta
+  // ahí. No es perfecto pero rescata la lista en vez de dejarla como un
+  // solo bloque ilegible.
+  return blob.split(/\s+(?=[A-ZÁÉÍÓÚÑ][\wáéíóúñÁÉÍÓÚÑ]*(?:\s+[\wáéíóúñÁÉÍÓÚÑ]+){0,4}\s+-\s+[\d¼½¾]+)/)
+    .map(p=>p.trim()).filter(Boolean);
+}
+function separarPasosSinSaltos(blob){
+  // Los pasos son oraciones — se corta después de cada punto/!/? seguido
+  // de una palabra que empieza con mayúscula.
+  return blob.split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑ])/).map(p=>p.trim()).filter(Boolean);
+}
 function parseRecetaPegada(texto){
   const out = { nombre:'', categoria:'', tiempoMin:'', porciones:'', ingredientes:[], pasos:[] };
-  let seccion = null;
-  String(texto).split('\n').forEach(linea=>{
-    const l = linea.trim();
-    if(!l) return;
-    const clave = quitarAcentos(l).toUpperCase();
-    if(clave.startsWith('NOMBRE:')){ out.nombre = l.slice(l.indexOf(':')+1).trim(); seccion=null; return; }
-    if(clave.startsWith('CATEGORIA:')){ out.categoria = l.slice(l.indexOf(':')+1).trim(); seccion=null; return; }
-    if(clave.startsWith('TIEMPO:')){ const n = l.match(/\d+/); out.tiempoMin = n?n[0]:''; seccion=null; return; }
-    if(clave.startsWith('PORCIONES:')){ const n = l.match(/\d+/); out.porciones = n?n[0]:''; seccion=null; return; }
-    if(clave.startsWith('INGREDIENTES')){ seccion='ing'; return; }
-    if(clave.startsWith('PASOS')){ seccion='pasos'; return; }
-    if(seccion==='ing'){
-      const partes = l.split(/\s+-\s+/).map(p=>p.trim());
-      out.ingredientes.push({ nombre: partes[0]||'', cantidad: partes[1]||'', unidad: partes[2]||'', nota: partes.slice(3).join(' - ')||'' });
-    } else if(seccion==='pasos'){
-      out.pasos.push(l.replace(/^(\d+[\.\)]|[-•*])\s*/, ''));
-    }
+  const t = String(texto);
+  const claves = [
+    ['nombre', /nombre\s*:/i], ['categoria', /categor[ií]a\s*:/i],
+    ['tiempoMin', /tiempo\s*:/i], ['porciones', /porciones\s*:/i],
+    ['ingredientes', /ingredientes\s*:/i], ['pasos', /pasos\s*:/i]
+  ];
+  const encontrados = [];
+  claves.forEach(([campo, re])=>{ const m = re.exec(t); if(m) encontrados.push({ campo, inicio:m.index, fin:m.index+m[0].length }); });
+  encontrados.sort((a,b)=>a.inicio-b.inicio);
+  let ingBlob = '', pasosBlob = '';
+  encontrados.forEach((e,i)=>{
+    const hasta = i+1 < encontrados.length ? encontrados[i+1].inicio : t.length;
+    const valor = t.slice(e.fin, hasta).trim();
+    if(e.campo==='nombre') out.nombre = valor;
+    else if(e.campo==='categoria') out.categoria = valor;
+    else if(e.campo==='tiempoMin'){ const n = valor.match(/\d+/); out.tiempoMin = n?n[0]:''; }
+    else if(e.campo==='porciones'){ const n = valor.match(/\d+/); out.porciones = n?n[0]:''; }
+    else if(e.campo==='ingredientes') ingBlob = valor;
+    else if(e.campo==='pasos') pasosBlob = valor;
   });
+
+  let lineasIng = ingBlob.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(lineasIng.length<=1 && ingBlob) lineasIng = separarIngredientesSinSaltos(ingBlob);
+  out.ingredientes = lineasIng.map(l=>{
+    const partes = l.split(/\s+-\s+/).map(p=>p.trim());
+    return { nombre: partes[0]||'', cantidad: partes[1]||'', unidad: partes[2]||'', nota: partes.slice(3).join(' - ')||'' };
+  }).filter(i=>i.nombre);
+
+  let lineasPasos = pasosBlob.split('\n').map(l=>l.trim()).filter(Boolean);
+  if(lineasPasos.length<=1 && pasosBlob) lineasPasos = separarPasosSinSaltos(pasosBlob);
+  out.pasos = lineasPasos.map(l=>l.replace(/^(\d+[\.\)]|[-•*])\s*/, ''));
+
   return out;
 }
 function convertirRecetaPegada(){
