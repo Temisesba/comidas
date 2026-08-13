@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Tepic';
+const BUILD_VERSION = 'Colima';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -843,6 +843,17 @@ function esVisible(row){ return !esVerdadero(row.Privado) || row.Usuario===usuar
 function activos(arr){ return arr.filter(r=> !esVerdadero(r.Papelera) && esVisible(r)); }
 function catEmoji(nombre){ const c = DATA.categorias.find(x=>x.Nombre===nombre); return c ? (c.Emoji||'🍽️') : '🍽️'; }
 function categoriasOrdenadas(){ return DATA.categorias.filter(c=>!esVerdadero(c.Papelera)).sort((a,b)=>(Number(a.Orden)||0)-(Number(b.Orden)||0)); }
+// Mismas unidades que ya usa Gastos (UNIDADES en Compras_v46.html) —
+// desplegable en vez de texto libre para que "kg"/"g"/etc. siempre
+// coincida exacto con la tabla de normalización del backend (precioComp) y
+// el histórico de precios de verdad sea comparable, no que alguien escriba
+// "kilo" o "gr" y la comparación se caiga en silencio al precio crudo.
+const UNIDADES_GASTOS = ['unidad','pieza','g','kg','mg','ml','l','cm','m','pastilla','sobre'];
+function unidadSelectHtml(id, seleccion){
+  return `<select id="${id}">` +
+    UNIDADES_GASTOS.map(u=>`<option value="${u}" ${u===seleccion?'selected':''}>${u}</option>`).join('') +
+    `</select>`;
+}
 function selectCategoriasHtml(id, seleccion){
   return `<select id="${id}"><option value="">Sin categoría</option>` +
     categoriasOrdenadas().map(c=>`<option value="${escAttr(c.Nombre)}" ${c.Nombre===seleccion?'selected':''}>${c.Emoji} ${escAttr(c.Nombre)}</option>`).join('') +
@@ -1481,7 +1492,7 @@ function abrirEditorInventario(id){
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('ivCategoria', f?f.Categoria:'')}</div>
     <div class="field-row">
       <div class="field"><label>Cantidad</label><input type="text" id="ivCantidad" value="${f?escAttr(f.Cantidad):''}"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="ivUnidad" placeholder="kg, pza, l…" value="${f?escAttr(f.Unidad):''}"></div>
+      <div class="field"><label>Unidad</label>${unidadSelectHtml('ivUnidad', f?f.Unidad:'kg')}</div>
       <div class="field"><label>Piezas</label><input type="text" id="ivPiezas" value="${f?escAttr(f.Piezas):''}"></div>
     </div>
     <div class="field"><label>Caduca</label><input type="date" id="ivCaducidad" value="${f?escAttr(f.FechaCaducidad):''}"></div>
@@ -1542,7 +1553,14 @@ async function cargarHistoricoPrecio(nombre){
   if(!cont) return;
   if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo cargar: ${escAttr(r.error||'sin conexión')}</p>`; return; }
   if(!r.historial.length){ cont.innerHTML = '<p class="hint">Todavía no hay precios registrados para este ingrediente.</p>'; return; }
-  cont.innerHTML = r.historial.map(h=>`<div class="ing-row"><span class="nombre">${fmtFecha(h.fecha)}${h.tienda?(' · '+escAttr(h.tienda)):''}</span><span class="cant">${fmtMoneda(h.precio)}</span></div>`).join('');
+  // Unificado por unidad comparable (ej. $/kg) cuando se puede — así de
+  // verdad se puede comparar entre compras de distinto tamaño de empaque,
+  // no solo ver precios crudos sueltos.
+  cont.innerHTML = r.historial.map(h=>{
+    const principal = h.comparable!==null ? (fmtMoneda(h.comparable)+' por '+(h.comparableEtiqueta||h.unidad)) : fmtMoneda(h.precio);
+    const detalle = h.cantidad ? (' · '+escAttr(h.cantidad)+' '+escAttr(h.unidad)+(h.comparable!==null?(' ('+fmtMoneda(h.precio)+' total)'):'')) : '';
+    return `<div class="ing-row"><span class="nombre">${fmtFecha(h.fecha)}${h.tienda?(' · '+escAttr(h.tienda)):''}${detalle}</span><span class="cant">${principal}</span></div>`;
+  }).join('');
 }
 async function guardarInventario(id){
   const nombre = document.getElementById('ivNombre').value.trim();
@@ -1585,7 +1603,7 @@ function abrirRegistrarPrecio(id){
     <div class="field"><label>Precio</label><input type="number" step="0.01" id="prPrecio" placeholder="0.00"></div>
     <div class="field-row">
       <div class="field"><label>Cantidad</label><input type="text" id="prCantidad" value="${escAttr(f.Cantidad||'')}"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="prUnidad" value="${escAttr(f.Unidad||'')}"></div>
+      <div class="field"><label>Unidad</label>${unidadSelectHtml('prUnidad', f.Unidad||'kg')}</div>
     </div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
@@ -1679,7 +1697,7 @@ function abrirCompararPrecioLista(nombre){
     <div class="field"><label>Precio</label><input type="number" step="0.01" id="cpPrecio" placeholder="0.00"></div>
     <div class="field-row">
       <div class="field"><label>Cantidad</label><input type="text" id="cpCantidad"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="cpUnidad"></div>
+      <div class="field"><label>Unidad</label>${unidadSelectHtml('cpUnidad', 'kg')}</div>
     </div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
@@ -1742,7 +1760,7 @@ function abrirMarcarComprado(id){
     <div class="field"><label>Precio pagado (opcional)</label><input type="number" step="0.01" id="mcPrecio" placeholder="0.00"></div>
     <div class="field-row">
       <div class="field"><label>Cantidad</label><input type="text" id="mcCantidad"></div>
-      <div class="field"><label>Unidad</label><input type="text" id="mcUnidad"></div>
+      <div class="field"><label>Unidad</label>${unidadSelectHtml('mcUnidad', 'kg')}</div>
     </div>
     <div class="field"><label>Tienda</label><input type="text" id="mcTienda" value="${escAttr(i.Tienda||'')}"></div>
     <div class="field"><label>Caduca (opcional)</label><input type="date" id="mcCaducidad"></div>
