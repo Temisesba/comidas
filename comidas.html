@@ -1,0 +1,1591 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Comidas — recetas y despensa</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#c0632b">
+<style>
+:root{
+  --bg:#faf6f0; --bg-card:#ffffff; --text:#2c2622; --text-soft:#7a726a;
+  --accent:#c0632b; --accent-soft:#f3ddce; --border:#ece2d6;
+  --danger:#c0392b; --danger-soft:#f6dcd8; --success:#2f7a4f; --success-soft:#dcefe2;
+  --warn:#b8860b; --warn-soft:#f5ecd2;
+  --radius:14px; --shadow:0 2px 10px rgba(60,40,25,.08);
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#211d1a; --bg-card:#2b2521; --text:#f1e8de; --text-soft:#b0a595; --accent:#e08a54; --accent-soft:#3c2e23; --border:#453a30; --danger-soft:#4a2724; --success-soft:#1f3a2a; --warn-soft:#3a3320; }
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);padding-bottom:76px}
+button,input,select,textarea{font:inherit;color:inherit}
+input,select,textarea{background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:9px 11px;width:100%}
+button{cursor:pointer}
+.hidden{display:none!important}
+h1,h2,h3{margin:0 0 8px}
+.hint{color:var(--text-soft);font-size:13px}
+
+#setupScreen,#userScreen{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+.setup-card{max-width:420px;width:100%;background:var(--bg-card);border-radius:var(--radius);padding:24px;box-shadow:var(--shadow)}
+.setup-card label{display:block;margin:14px 0 4px;font-size:13px;color:var(--text-soft)}
+.setup-err{color:var(--danger);font-size:13px;margin-top:8px;min-height:16px}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-weight:600}
+.btn.secondary{background:var(--accent-soft);color:var(--accent)}
+.btn.danger{background:var(--danger);color:#fff}
+.btn.ghost{background:transparent;border:1px solid var(--border);color:var(--text)}
+.btn.ghost.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.block{width:100%;text-align:center}
+.user-pick{display:flex;flex-direction:column;gap:8px;margin-top:16px}
+.user-pick button{background:var(--accent-soft);color:var(--accent);border:none;border-radius:10px;padding:12px 14px;font-weight:600;text-align:left;display:flex;justify-content:space-between;align-items:center}
+
+header{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:1px solid var(--border);padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+header .brand{font-weight:700;font-size:17px}
+header .userbtn{background:var(--accent-soft);color:var(--accent);border:none;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600}
+#connBanner{background:var(--danger-soft);color:var(--danger);font-size:13px;text-align:center;padding:6px;display:none}
+#connBanner.show{display:block}
+main{max-width:900px;margin:0 auto;padding:16px}
+.screen{display:none}
+.screen.active{display:block}
+
+nav.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:20;display:flex;background:var(--bg-card);border-top:1px solid var(--border);padding:6px 2px calc(6px + env(safe-area-inset-bottom))}
+nav.tabbar button{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;padding:6px 1px;border-radius:10px;color:var(--text-soft);font-size:10px}
+nav.tabbar button.active{color:var(--accent);background:var(--accent-soft)}
+nav.tabbar button .ic{font-size:18px}
+
+.card{background:var(--bg-card);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden;margin-bottom:12px}
+.card .thumb{width:100%;aspect-ratio:16/9;object-fit:cover;background:var(--accent-soft);cursor:zoom-in;display:block}
+.card .thumb.ph{display:flex;align-items:center;justify-content:center;font-size:36px}
+.card .body{padding:10px 12px 12px}
+.card .titulo{font-weight:700;font-size:15px}
+.card .meta{color:var(--text-soft);font-size:12px;margin-top:2px}
+.card .row-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+.card .row-actions button{padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);font-size:13px}
+
+.grid-recetas{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;margin-top:12px}
+
+.chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin:12px 0}
+.chip{flex:none;padding:6px 12px;border-radius:999px;border:1px solid var(--border);background:var(--bg-card);font-size:13px;white-space:nowrap}
+.chip.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.searchbar{display:flex;gap:8px}
+.searchbar input{flex:1}
+
+.modal-overlay{position:fixed;inset:0;background:rgba(20,15,12,.5);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
+.modal{background:var(--bg-card);border-radius:var(--radius);padding:20px;max-width:520px;width:100%;max-height:90vh;overflow:auto;box-shadow:var(--shadow)}
+.modal h3{margin-bottom:12px}
+.modal .field{margin-bottom:12px}
+.modal .field label{display:block;font-size:13px;color:var(--text-soft);margin-bottom:4px}
+.modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap}
+.confirm-modal p{margin:0 0 4px}
+.field-row{display:flex;gap:8px}
+.field-row .field{flex:1}
+
+#toast{position:fixed;left:50%;bottom:88px;transform:translate(-50%,20px);background:var(--text);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:200;max-width:88vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+.crop-wrap{position:relative;max-width:100%;width:fit-content;margin:14px auto 0;border-radius:var(--radius);overflow:hidden;touch-action:none}
+.crop-wrap img{display:block;max-width:100%;max-height:60vh;width:auto;height:auto;user-select:none;-webkit-user-drag:none}
+.crop-box{position:absolute;border:2px solid var(--accent);box-shadow:0 0 0 9999px rgba(0,0,0,.45);cursor:move;touch-action:none}
+.crop-handle{position:absolute;width:22px;height:22px;background:var(--accent);border:2px solid #fff;border-radius:50%;transform:translate(-50%,-50%);touch-action:none}
+.crop-handle[data-corner="nw"]{left:0;top:0;cursor:nwse-resize}
+.crop-handle[data-corner="ne"]{left:100%;top:0;cursor:nesw-resize}
+.crop-handle[data-corner="sw"]{left:0;top:100%;cursor:nesw-resize}
+.crop-handle[data-corner="se"]{left:100%;top:100%;cursor:nwse-resize}
+
+.badge{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600}
+.badge.tiene{background:var(--success-soft);color:var(--success)}
+.badge.falta{background:var(--danger-soft);color:var(--danger)}
+.badge.caro{background:var(--danger-soft);color:var(--danger)}
+.badge.bueno{background:var(--success-soft);color:var(--success)}
+.badge.normal{background:var(--border);color:var(--text-soft)}
+.badge.fav{background:var(--accent-soft);color:var(--accent)}
+
+.ing-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+.ing-row:last-child{border-bottom:none}
+.ing-row .nombre{flex:1}
+.ing-row .cant{color:var(--text-soft);font-size:12px}
+
+.estrellas{display:flex;gap:4px;font-size:24px;cursor:pointer;user-select:none}
+.estrellas span{color:var(--border)}
+.estrellas span.on{color:#e0a52b}
+.estrellas.chico{font-size:14px;pointer-events:none}
+
+.inv-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:8px;border-left:5px solid var(--border)}
+.inv-item.vencido{border-left-color:var(--danger)}
+.inv-item.pronto{border-left-color:var(--warn)}
+.inv-item.ok{border-left-color:var(--success)}
+.inv-item .info{flex:1;min-width:0}
+.inv-item .nombre{font-weight:600;font-size:14px}
+.inv-item .meta{font-size:12px;color:var(--text-soft)}
+.inv-item .acciones{display:flex;gap:4px}
+.inv-item .acciones button{padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-card);font-size:14px}
+
+.grupo-titulo{font-weight:700;font-size:14px;margin:18px 0 8px;color:var(--text-soft);display:flex;align-items:center;gap:6px}
+
+.compra-item{display:flex;align-items:center;gap:10px;padding:10px 8px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:8px}
+.compra-item.comprado{opacity:.55;text-decoration:line-through}
+.compra-item .chk{width:26px;height:26px;flex:none;border-radius:50%;border:2px solid var(--accent);background:none;font-size:14px;display:flex;align-items:center;justify-content:center}
+.compra-item.comprado .chk{background:var(--accent);color:#fff}
+.compra-item .info{flex:1;min-width:0}
+
+.dia-col{margin-bottom:18px}
+.dia-header{font-weight:700;font-size:14px;margin-bottom:6px}
+.slot-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:6px}
+.slot-row .slot-nombre{width:70px;flex:none;font-size:12px;color:var(--text-soft)}
+.slot-row .slot-contenido{flex:1;font-size:13px}
+.slot-row.vacio{opacity:.6}
+.slot-row.cocinado{background:var(--success-soft)}
+
+.idea-card{background:var(--accent-soft);border-radius:var(--radius);padding:14px;margin-top:10px}
+
+.cat-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+.cat-row:last-child{border-bottom:none}
+.cat-row input[type=text]{flex:1}
+.cat-row .emoji-in{width:52px;flex:none;text-align:center}
+
+.userlist-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)}
+.userlist-row:last-child{border-bottom:none}
+.userlist-row .nombre{flex:1;font-weight:600}
+</style>
+</head>
+<body>
+
+<div id="setupScreen">
+  <div class="setup-card">
+    <h2>🍲 Comidas</h2>
+    <p class="hint">Pega la URL de tu Web App (Apps Script) para conectar la app a tus datos.</p>
+    <label for="setupGas">URL de la Web App (Apps Script)</label>
+    <input type="url" id="setupGas" placeholder="https://script.google.com/macros/s/…/exec">
+    <div class="setup-err" id="setupErr"></div>
+    <button class="btn block" style="margin-top:14px" onclick="finishSetup()">Conectar</button>
+  </div>
+</div>
+
+<div id="userScreen" class="hidden">
+  <div class="setup-card" id="userScreenInner"></div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <div class="brand">🍲 Comidas</div>
+    <button class="userbtn" onclick="switchTab('config')" id="userBtnHeader">👤</button>
+  </header>
+  <div id="connBanner">Sin conexión — viendo copia guardada. Los cambios se reintentarán solos.</div>
+
+  <main>
+    <div id="screen-inicio" class="screen active">
+      <h2>🏠 Inicio</h2>
+      <div id="inicioCaducar"></div>
+      <div id="inicioQueCocino"></div>
+      <div style="margin-top:18px">
+        <button class="btn block" onclick="pedirIdeaIA()" id="btnIdeaIA">💡 Dame una idea</button>
+        <div id="ideaResultado"></div>
+      </div>
+    </div>
+
+    <div id="screen-recetas" class="screen">
+      <h2>📖 Recetas</h2>
+      <div class="searchbar">
+        <input type="text" id="recetasBuscar" placeholder="Buscar receta…" oninput="renderRecetas()">
+        <button class="btn ghost" id="recetasFavBtn" onclick="toggleSoloFavoritas()">⭐</button>
+      </div>
+      <div class="chips" id="recetasChips"></div>
+      <div class="grid-recetas" id="recetasGrid"></div>
+      <button class="btn block" style="margin-top:14px" onclick="abrirEditorReceta(null)">➕ Nueva receta</button>
+    </div>
+
+    <div id="screen-inventario" class="screen">
+      <h2>🧺 Inventario</h2>
+      <div id="inventarioLista"></div>
+      <button class="btn block" style="margin-top:14px" onclick="abrirEditorInventario(null)">➕ Agregar al inventario</button>
+    </div>
+
+    <div id="screen-compras" class="screen">
+      <h2>🛒 Lista de compras</h2>
+      <div id="comprasLista"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" style="flex:1" onclick="abrirAgregarCompra(null)">➕ Agregar item</button>
+        <button class="btn ghost" style="flex:1" onclick="limpiarComprados()">🧹 Limpiar comprados</button>
+      </div>
+    </div>
+
+    <div id="screen-calendario" class="screen">
+      <h2>📅 Calendario</h2>
+      <div id="calendarioLista"></div>
+    </div>
+
+    <div id="screen-config" class="screen">
+      <h2>⚙️ Configuración</h2>
+      <div class="card"><div class="body">
+        <h3>Usuario</h3>
+        <p class="hint">Sesión activa: <b id="cfgUsuarioActivo">—</b></p>
+        <button class="btn secondary" onclick="cambiarUsuario()">🔄 Cambiar de usuario</button>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>Usuarios</h3>
+        <div id="cfgUsuariosLista"></div>
+        <button class="btn secondary" style="margin-top:8px" onclick="abrirNuevoUsuarioConfig()">➕ Agregar usuario</button>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>Categorías</h3>
+        <div id="cfgCategoriasLista"></div>
+        <button class="btn secondary" style="margin-top:8px" onclick="agregarCategoria()">➕ Agregar categoría</button>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>Notas</h3>
+        <textarea id="cfgNotas" rows="4" oninput="onNotasInput()" placeholder="Ideas, pendientes…"></textarea>
+        <div class="hint" id="cfgNotasEstado" style="margin-top:4px"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn ghost" onclick="copiarNotas()">📋 Copiar</button>
+          <button class="btn ghost" onclick="limpiarNotas()">🗑 Borrar</button>
+        </div>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>Papelera</h3>
+        <div id="cfgPapelera"></div>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>Datos y versión</h3>
+        <p class="hint">Versión: <b id="cfgVersion"></b>
+          <button class="btn ghost" style="font-size:12px;padding:6px 10px;margin-left:8px" onclick="forceReloadApp()">🔄 Forzar actualización</button>
+        </p>
+        <p class="hint" id="cfgSheetLink"></p>
+        <button class="btn ghost" onclick="cambiarUrlBackend()">🔗 Cambiar URL de la Web App</button>
+      </div></div>
+    </div>
+  </main>
+
+  <nav class="tabbar">
+    <button data-tab="inicio" onclick="switchTab('inicio')"><span class="ic">🏠</span>Inicio</button>
+    <button data-tab="recetas" onclick="switchTab('recetas')"><span class="ic">📖</span>Recetas</button>
+    <button data-tab="inventario" onclick="switchTab('inventario')"><span class="ic">🧺</span>Inventario</button>
+    <button data-tab="compras" onclick="switchTab('compras')"><span class="ic">🛒</span>Compras</button>
+    <button data-tab="calendario" onclick="switchTab('calendario')"><span class="ic">📅</span>Calendario</button>
+    <button data-tab="config" onclick="switchTab('config')"><span class="ic">⚙️</span>Config</button>
+  </nav>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ============================================================
+//  Estado y configuración
+// ============================================================
+let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
+let SHEET_URL = '';
+const BUILD_VERSION = 'Merida';
+let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
+let usuarioActivo = null; // {ID,Nombre}
+let soloFavoritas = false;
+let recetasChipActivo = 'Todas';
+
+function esVerdadero(v){ return v===true || String(v).toLowerCase()==='true'; }
+function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now()+'-'+Math.random().toString(36).slice(2)); }
+function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2800); }
+function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function hoyLocalISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function fmtFecha(iso){ if(!iso) return ''; const [y,m,d] = String(iso).slice(0,10).split('-'); return d && m && y ? d+'/'+m+'/'+y : iso; }
+function fmtMoneda(v){ if(v===null||v===undefined||v==='') return ''; return '$'+Number(v).toFixed(2); }
+function normalizarNombre(t){
+  if(!t) return '';
+  let s = String(t).toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(s.length>3 && s.endsWith('es')) s = s.slice(0,-2);
+  else if(s.length>3 && s.endsWith('s')) s = s.slice(0,-1);
+  return s;
+}
+function parseIngredientes(json){ try{ const a = JSON.parse(json); return Array.isArray(a) ? a : []; }catch(e){ return []; } }
+
+// ============================================================
+//  Comunicación con el backend
+// ============================================================
+const ACCIONES_REINTENTABLES = new Set(['saveRow']);
+const COLA_PENDIENTE_KEY = 'comidas_cola_pendiente';
+let reintentandoCola = false;
+function needsSetup(){ return !GAS_URL; }
+async function apiPost(action, params){
+  if(needsSetup()) return { ok:false, error:'sin vincular' };
+  const body = Object.assign({ action }, params||{});
+  try{
+    const f = new FormData(); f.append('payload', JSON.stringify(body));
+    const r = await fetch(GAS_URL, { method:'POST', body:f });
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const data = await r.json();
+    setConnBanner(false);
+    return data;
+  }catch(e){
+    setConnBanner(true);
+    if(ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
+    return { ok:false, error: e.message||'sin conexión' };
+  }
+}
+function encolarReintento(action, params){
+  let cola = [];
+  try{ cola = JSON.parse(localStorage.getItem(COLA_PENDIENTE_KEY))||[]; }catch(e){}
+  cola.push({ action, params });
+  try{ localStorage.setItem(COLA_PENDIENTE_KEY, JSON.stringify(cola)); }catch(e){}
+  showToast('Sin conexión — se guardará solo cuando vuelva el internet');
+}
+async function procesarColaPendiente(){
+  let cola = [];
+  try{ cola = JSON.parse(localStorage.getItem(COLA_PENDIENTE_KEY))||[]; }catch(e){}
+  if(!cola.length) return;
+  const restante = [];
+  let ok = 0;
+  reintentandoCola = true;
+  for(const item of cola){
+    const r = await apiPost(item.action, item.params);
+    if(r && r.ok) ok++; else restante.push(item);
+  }
+  reintentandoCola = false;
+  try{ localStorage.setItem(COLA_PENDIENTE_KEY, JSON.stringify(restante)); }catch(e){}
+  if(ok) showToast(`Se guardaron ${ok} cambio(s) pendiente(s)`);
+}
+function setConnBanner(show){ const el=document.getElementById('connBanner'); if(el) el.classList.toggle('show', show); }
+
+function finishSetup(){
+  const gasUrl = document.getElementById('setupGas').value.trim();
+  const err = document.getElementById('setupErr');
+  if(!/^https:\/\/script\.google\.com\/macros\/s\/.+\/exec$/.test(gasUrl)){ err.textContent='La URL de la Web App debe terminar en /exec'; return; }
+  GAS_URL = gasUrl;
+  localStorage.setItem('comidas_gas_url', GAS_URL);
+  err.textContent = 'Conectando…';
+  apiPost('init', {}).then(r=>{
+    if(r && r.ok){ DATA = normalizeData(r.data); SHEET_URL = r.sheetUrl||''; localStorage.setItem('comidas_data_cache', JSON.stringify(DATA)); afterConnected(); }
+    else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa el enlace'); }
+  });
+}
+function cambiarUrlBackend(){
+  confirmarEliminar('Vas a desconectar esta app de tu Google Sheet actual (tus datos no se borran, solo se deja de ver el enlace desde este celular). ¿Continuar?', ()=>{
+    localStorage.removeItem('comidas_gas_url');
+    localStorage.removeItem('comidas_usuario_id');
+    location.reload();
+  });
+}
+function normalizeData(d){
+  return {
+    usuarios: d.usuarios||[], categorias: d.categorias||[], recetas: d.recetas||[],
+    recetas_historial: d.recetas_historial||[], inventario: d.inventario||[],
+    precios: d.precios||[], lista_compras: d.lista_compras||[], calendario: d.calendario||[],
+    config: d.config||[]
+  };
+}
+
+function afterConnected(){
+  document.getElementById('setupScreen').classList.add('hidden');
+  renderUserScreen();
+}
+
+function boot(){
+  const cached = localStorage.getItem('comidas_data_cache');
+  if(cached){ try{ DATA = normalizeData(JSON.parse(cached)); }catch(e){} }
+  if(needsSetup()){ return; }
+  document.getElementById('setupScreen').classList.add('hidden');
+  renderUserScreen();
+}
+async function refreshData(){
+  const r = await apiPost('getAll', {});
+  if(r && r.ok){
+    DATA = normalizeData(r.data);
+    if(r.sheetUrl) SHEET_URL = r.sheetUrl;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    purgarPapeleraAntigua();
+    renderAllScreens();
+  }
+}
+function renderAllScreens(){
+  renderInicio(); renderRecetas(); renderInventario(); renderCompras(); renderCalendario(); renderConfig();
+}
+function switchTab(name){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  document.querySelectorAll('nav.tabbar button').forEach(b=>b.classList.toggle('active', b.dataset.tab===name));
+  if(name==='inicio') renderInicio();
+  if(name==='recetas') renderRecetas();
+  if(name==='inventario') renderInventario();
+  if(name==='compras') renderCompras();
+  if(name==='calendario') renderCalendario();
+  if(name==='config') renderConfig();
+}
+
+// ============================================================
+//  Modal genérico de confirmación + ver foto grande
+// ============================================================
+function confirmarEliminar(mensaje, onConfirmar){
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal confirm-modal">
+    <h3>¿Confirmar?</h3>
+    <p>${mensaje}</p>
+    <div class="actions">
+      <button class="btn ghost" id="cnCancel">Cancelar</button>
+      <button class="btn danger" id="cnOk">Confirmar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#cnCancel').onclick = ()=> overlay.remove();
+  overlay.addEventListener('click', e=>{ if(e.target===overlay) overlay.remove(); });
+  overlay.querySelector('#cnOk').onclick = ()=>{ overlay.remove(); onConfirmar(); };
+}
+function verFotoGrande(url){
+  if(!url) return;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<img src="${url}" style="max-width:100%;max-height:88vh;border-radius:var(--radius);display:block">`;
+  overlay.addEventListener('click', ()=> overlay.remove());
+  document.body.appendChild(overlay);
+}
+function abrirModal(html, opts){
+  opts = opts || {};
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML = `<div class="modal">${html}</div>`;
+  overlay.addEventListener('click', e=>{
+    if(e.target!==overlay) return;
+    if(opts.confirmarCierre){ confirmarEliminar('Tienes cambios sin guardar — si sales se pierden. ¿Salir de todos modos?', ()=>overlay.remove()); }
+    else overlay.remove();
+  });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// ============================================================
+//  Fotos: recorte manual antes de subir
+// ============================================================
+function resizeImageFile(file, maxDim, quality){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = ()=>{
+        let w = img.width, h = img.height;
+        if(w > maxDim || h > maxDim){
+          if(w >= h){ h = Math.round(h*maxDim/w); w = maxDim; } else { w = Math.round(w*maxDim/h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve({ dataUrl, width:w, height:h, base64: dataUrl.split(',')[1], mimeType:'image/jpeg', canvas });
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+let cropState = null;
+function clamp(v,min,max){ return Math.min(max, Math.max(min, v)); }
+function mostrarRecorteManual(resized, { containerId, onListo, onDescartar }){
+  cropState = { resized, containerId, onListo, onDescartar, rect: { x:0.06, y:0.06, w:0.88, h:0.88 }, mode:null, startPointer:null, startRect:null };
+  document.getElementById(containerId).innerHTML = `
+    <div class="crop-wrap" id="cropWrap">
+      <img id="cropImg" src="${resized.dataUrl}" draggable="false">
+      <div class="crop-box" id="cropBox">
+        <div class="crop-handle" data-corner="nw"></div>
+        <div class="crop-handle" data-corner="ne"></div>
+        <div class="crop-handle" data-corner="sw"></div>
+        <div class="crop-handle" data-corner="se"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button type="button" class="btn secondary" onclick="cropState.onDescartar()">Descartar foto</button>
+      <button type="button" class="btn" onclick="confirmarRecorte()">✂️ Recortar y usar</button>
+    </div>`;
+  posicionarCropBox();
+  document.getElementById('cropBox').addEventListener('pointerdown', onCropPointerDown);
+  window.addEventListener('pointermove', onCropPointerMove);
+  window.addEventListener('pointerup', onCropPointerUp);
+}
+function posicionarCropBox(){
+  const box = document.getElementById('cropBox'); if(!box) return;
+  const r = cropState.rect;
+  box.style.left = (r.x*100)+'%'; box.style.top = (r.y*100)+'%';
+  box.style.width = (r.w*100)+'%'; box.style.height = (r.h*100)+'%';
+}
+function onCropPointerDown(e){
+  const handle = e.target.closest('.crop-handle');
+  cropState.mode = handle ? handle.dataset.corner : 'move';
+  cropState.startPointer = { x:e.clientX, y:e.clientY };
+  cropState.startRect = { ...cropState.rect };
+  e.preventDefault();
+}
+function onCropPointerMove(e){
+  if(!cropState || !cropState.mode) return;
+  const wrap = document.getElementById('cropWrap'); if(!wrap) return;
+  const bounds = wrap.getBoundingClientRect();
+  const dx = (e.clientX - cropState.startPointer.x)/bounds.width;
+  const dy = (e.clientY - cropState.startPointer.y)/bounds.height;
+  let { x, y, w, h } = cropState.startRect;
+  const mode = cropState.mode;
+  if(mode==='move'){
+    x = clamp(x+dx, 0, 1-w); y = clamp(y+dy, 0, 1-h);
+  } else {
+    if(mode.includes('w')){ const nx = clamp(x+dx, 0, x+w-0.05); w = w+(x-nx); x = nx; }
+    if(mode.includes('e')){ w = clamp(w+dx, 0.05, 1-x); }
+    if(mode.includes('n')){ const ny = clamp(y+dy, 0, y+h-0.05); h = h+(y-ny); y = ny; }
+    if(mode.includes('s')){ h = clamp(h+dy, 0.05, 1-y); }
+  }
+  cropState.rect = { x, y, w, h };
+  posicionarCropBox();
+}
+function onCropPointerUp(){ if(cropState) cropState.mode = null; }
+function cleanupCropListeners(){
+  window.removeEventListener('pointermove', onCropPointerMove);
+  window.removeEventListener('pointerup', onCropPointerUp);
+}
+function confirmarRecorte(){
+  const { resized, rect, onListo } = cropState;
+  cleanupCropListeners();
+  const sx = Math.round(rect.x * resized.width);
+  const sy = Math.round(rect.y * resized.height);
+  const sw = Math.max(1, Math.round(rect.w * resized.width));
+  const sh = Math.max(1, Math.round(rect.h * resized.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = sw; canvas.height = sh;
+  canvas.getContext('2d').drawImage(resized.canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+  const recortada = { dataUrl, width: sw, height: sh, base64: dataUrl.split(',')[1], mimeType:'image/jpeg' };
+  onListo(recortada);
+}
+async function subirFotoDesdeInput(fileList, containerId, onSubida){
+  if(!fileList || !fileList.length) return;
+  const resized = await resizeImageFile(fileList[0], 1280, 0.85);
+  mostrarRecorteManual(resized, {
+    containerId,
+    onDescartar: ()=>{ document.getElementById(containerId).innerHTML = ''; },
+    onListo: async (recortada)=>{
+      document.getElementById(containerId).innerHTML = '<p class="hint">Subiendo foto…</p>';
+      const r = await apiPost('uploadImage', { imageBase64: recortada.base64, mimeType: recortada.mimeType, fileName:'comidas-'+Date.now()+'.jpg' });
+      if(r.ok){ onSubida(r.url); }
+      else { document.getElementById(containerId).innerHTML = ''; showToast('No se pudo subir la foto: '+(r.error||'sin conexión')); }
+    }
+  });
+}
+
+const NOMBRE_MODELO = { gemini:'Gemini', claude:'Claude' };
+function mensajeModelo(r, verbo){
+  if(!r || !r.modelo) return '';
+  if(r.modelo==='claude' && r.motivoFallback==='cuota') return '⚠️ Gemini se quedó sin créditos gratis por hoy — se usó Claude';
+  return `${verbo} con ${NOMBRE_MODELO[r.modelo]||r.modelo}`;
+}
+
+async function forceReloadApp(){
+  try{
+    if('caches' in window){
+      const nombres = await caches.keys();
+      await Promise.all(nombres.map(n=>caches.delete(n)));
+    }
+    if('serviceWorker' in navigator){
+      const regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  } catch(e){}
+  location.href = location.pathname + '?_r=' + Date.now();
+}
+
+// ============================================================
+//  Usuarios
+// ============================================================
+function usuariosActivos(){ return DATA.usuarios.filter(u=>!esVerdadero(u.Papelera)); }
+function renderUserScreen(){
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('userScreen').classList.remove('hidden');
+  const activos = usuariosActivos();
+  const guardadoId = localStorage.getItem('comidas_usuario_id');
+  const guardado = activos.find(u=>u.ID===guardadoId);
+  if(guardado){ activarUsuario(guardado); return; }
+
+  const inner = document.getElementById('userScreenInner');
+  if(!activos.length){
+    inner.innerHTML = `<h2>🍲 Comidas</h2>
+      <p class="hint">Es la primera vez que se abre esta app aquí — ¿cómo te llamas?</p>
+      <label>Tu nombre</label>
+      <input type="text" id="primerNombre" placeholder="ej: Temis">
+      <label>Contraseña (opcional)</label>
+      <input type="password" id="primerPass" placeholder="Déjalo vacío si no quieres">
+      <div class="setup-err" id="primerErr"></div>
+      <button class="btn block" style="margin-top:14px" onclick="crearPrimerUsuario()">Empezar</button>`;
+    return;
+  }
+  inner.innerHTML = `<h2>🍲 ¿Quién eres?</h2>
+    <div class="user-pick" id="userPickList"></div>
+    <button class="btn secondary block" style="margin-top:14px" onclick="mostrarFormNuevoUsuario()">➕ Nuevo usuario</button>`;
+  document.getElementById('userPickList').innerHTML = activos.map(u=>
+    `<button onclick="pedirActivarUsuario('${u.ID}')"><span>${escAttr(u.Nombre)}</span>${u.Password?'<span>🔒</span>':''}</button>`
+  ).join('');
+}
+async function crearPrimerUsuario(){
+  const nombre = document.getElementById('primerNombre').value.trim();
+  const err = document.getElementById('primerErr');
+  if(!nombre){ err.textContent = 'Escribe tu nombre'; return; }
+  const password = document.getElementById('primerPass').value;
+  const row = { ID: uid(), Nombre: nombre, Password: password||'', Papelera:false };
+  err.textContent = 'Creando…';
+  const r = await apiPost('saveRow', { table:'USUARIOS', row });
+  if(!r.ok){ err.textContent = 'No se pudo crear: '+(r.error||'sin conexión'); return; }
+  DATA.usuarios.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  activarUsuario(row);
+}
+function mostrarFormNuevoUsuario(){
+  const inner = document.getElementById('userScreenInner');
+  inner.innerHTML = `<h2>➕ Nuevo usuario</h2>
+    <label>Nombre</label>
+    <input type="text" id="nuevoNombre" placeholder="Nombre">
+    <label>Contraseña (opcional)</label>
+    <input type="password" id="nuevoPass" placeholder="Déjalo vacío si no quieres">
+    <div class="setup-err" id="nuevoErr"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn ghost" style="flex:1" onclick="renderUserScreen()">Cancelar</button>
+      <button class="btn" style="flex:1" onclick="guardarNuevoUsuario()">Crear</button>
+    </div>`;
+}
+async function guardarNuevoUsuario(){
+  const nombre = document.getElementById('nuevoNombre').value.trim();
+  const err = document.getElementById('nuevoErr');
+  if(!nombre){ err.textContent = 'Escribe un nombre'; return; }
+  const password = document.getElementById('nuevoPass').value;
+  const row = { ID: uid(), Nombre: nombre, Password: password||'', Papelera:false };
+  err.textContent = 'Creando…';
+  const r = await apiPost('saveRow', { table:'USUARIOS', row });
+  if(!r.ok){ err.textContent = 'No se pudo crear: '+(r.error||'sin conexión'); return; }
+  DATA.usuarios.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  activarUsuario(row);
+}
+function pedirActivarUsuario(id){
+  const u = DATA.usuarios.find(x=>x.ID===id);
+  if(!u) return;
+  if(!u.Password){ activarUsuario(u); return; }
+  const inner = document.getElementById('userScreenInner');
+  inner.innerHTML = `<h2>🔒 ${escAttr(u.Nombre)}</h2>
+    <label>Contraseña</label>
+    <input type="password" id="passIntento" placeholder="Contraseña">
+    <div class="setup-err" id="passErr"></div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button class="btn ghost" style="flex:1" onclick="renderUserScreen()">Cancelar</button>
+      <button class="btn" style="flex:1" onclick="intentarPassword('${id}')">Entrar</button>
+    </div>`;
+  document.getElementById('passIntento').focus();
+}
+function intentarPassword(id){
+  const u = DATA.usuarios.find(x=>x.ID===id);
+  const intento = document.getElementById('passIntento').value;
+  if(intento !== u.Password){ document.getElementById('passErr').textContent = 'Contraseña incorrecta'; return; }
+  activarUsuario(u);
+}
+function activarUsuario(u){
+  usuarioActivo = u;
+  localStorage.setItem('comidas_usuario_id', u.ID);
+  document.getElementById('userScreen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userBtnHeader').textContent = '👤 '+u.Nombre;
+  switchTab('inicio');
+  renderAllScreens();
+  refreshData();
+  procesarColaPendiente();
+  if('serviceWorker' in navigator){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }
+  window.addEventListener('online', ()=>{ refreshData(); procesarColaPendiente(); });
+}
+function cambiarUsuario(){
+  localStorage.removeItem('comidas_usuario_id');
+  usuarioActivo = null;
+  document.getElementById('app').classList.add('hidden');
+  renderUserScreen();
+}
+
+// ============================================================
+//  Visibilidad (compartido + privado) y utilidades de datos
+// ============================================================
+function esVisible(row){ return !esVerdadero(row.Privado) || row.Usuario===usuarioActivo.ID; }
+function activos(arr){ return arr.filter(r=> !esVerdadero(r.Papelera) && esVisible(r)); }
+function catEmoji(nombre){ const c = DATA.categorias.find(x=>x.Nombre===nombre); return c ? (c.Emoji||'🍽️') : '🍽️'; }
+function categoriasOrdenadas(){ return DATA.categorias.filter(c=>!esVerdadero(c.Papelera)).sort((a,b)=>(Number(a.Orden)||0)-(Number(b.Orden)||0)); }
+function selectCategoriasHtml(id, seleccion){
+  return `<select id="${id}"><option value="">Sin categoría</option>` +
+    categoriasOrdenadas().map(c=>`<option value="${escAttr(c.Nombre)}" ${c.Nombre===seleccion?'selected':''}>${c.Emoji} ${escAttr(c.Nombre)}</option>`).join('') +
+    `</select>`;
+}
+function diasHasta(fechaISO){
+  if(!fechaISO) return null;
+  const hoy = new Date(hoyLocalISO()+'T00:00:00');
+  const f = new Date(String(fechaISO).slice(0,10)+'T00:00:00');
+  return Math.round((f-hoy)/86400000);
+}
+function urgenciaCaducidad(fechaISO){
+  const d = diasHasta(fechaISO);
+  if(d===null) return 'sin';
+  if(d<0) return 'vencido';
+  if(d<=5) return 'pronto';
+  return 'ok';
+}
+function tieneIngrediente(ing){
+  const nombreNorm = normalizarNombre(ing.nombre);
+  if(!nombreNorm) return { tiene:true, disponible:0, faltante:0 };
+  const filas = activos(DATA.inventario).filter(f=>normalizarNombre(f.Nombre)===nombreNorm && urgenciaCaducidad(f.FechaCaducidad)!=='vencido');
+  const disponible = filas.reduce((s,f)=> s + (parseFloat(f.Cantidad)||0), 0);
+  const necesita = parseFloat(ing.cantidad)||0;
+  const tiene = necesita ? (filas.length>0 && disponible>=necesita) : filas.length>0;
+  return { tiene, disponible, faltante: Math.max(0, necesita-disponible) };
+}
+function matchReceta(receta){
+  const ings = parseIngredientes(receta.IngredientesJSON);
+  if(!ings.length) return { pct:0, faltan:[] };
+  let tienes = 0; const faltan = [];
+  ings.forEach(ing=>{ const r = tieneIngrediente(ing); if(r.tiene) tienes++; else faltan.push(ing); });
+  return { pct: Math.round(tienes/ings.length*100), faltan };
+}
+function historialDeReceta(recetaId){
+  return DATA.recetas_historial.filter(h=>h.RecetaID===recetaId).sort((a,b)=> (b.Fecha||'').localeCompare(a.Fecha||''));
+}
+function promedioEstrellas(recetaId){
+  const h = historialDeReceta(recetaId).filter(x=>x.Estrellas);
+  if(!h.length) return null;
+  return h.reduce((s,x)=>s+Number(x.Estrellas),0)/h.length;
+}
+function estrellasHtml(valor, chico){
+  valor = Math.round(valor||0);
+  return `<span class="estrellas${chico?' chico':''}">` + [1,2,3,4,5].map(n=>`<span class="${n<=valor?'on':''}">★</span>`).join('') + `</span>`;
+}
+
+// ============================================================
+//  Purga automática de papelera (>30 días)
+// ============================================================
+function purgarPapeleraAntigua(){
+  const limite = new Date(hoyLocalISO()+'T00:00:00'); limite.setDate(limite.getDate()-30);
+  const revisar = [
+    ['RECETAS', DATA.recetas, 'FechaAlta'],
+    ['INVENTARIO', DATA.inventario, 'FechaAlta'],
+    ['LISTA_COMPRAS', DATA.lista_compras, 'FechaAlta'],
+  ];
+  revisar.forEach(([tabla, filas, campoFecha])=>{
+    filas.filter(f=>esVerdadero(f.Papelera) && f[campoFecha]).forEach(f=>{
+      const fecha = new Date(String(f[campoFecha]).slice(0,10)+'T00:00:00');
+      if(fecha < limite) apiPost('deleteRow', { table: tabla, id: f.ID });
+    });
+  });
+}
+
+// ============================================================
+//  INICIO
+// ============================================================
+function renderInicio(){
+  if(!usuarioActivo) return;
+  const inv = activos(DATA.inventario).filter(f=>{ const u = urgenciaCaducidad(f.FechaCaducidad); return u==='vencido' || u==='pronto'; })
+    .sort((a,b)=> (diasHasta(a.FechaCaducidad)??999) - (diasHasta(b.FechaCaducidad)??999)).slice(0,6);
+  const cad = document.getElementById('inicioCaducar');
+  cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div>` + (inv.length ? inv.map(f=>{
+    const d = diasHasta(f.FechaCaducidad);
+    const texto = d<0 ? 'venció hace '+Math.abs(d)+' día(s)' : d===0 ? 'caduca hoy' : 'caduca en '+d+' día(s)';
+    return `<div class="inv-item ${urgenciaCaducidad(f.FechaCaducidad)}"><div class="info"><div class="nombre">${catEmoji(f.Categoria)} ${escAttr(f.Nombre)}</div><div class="meta">${texto}</div></div></div>`;
+  }).join('') : `<p class="hint">Nada por caducar pronto 👍</p>`);
+
+  const recetas = activos(DATA.recetas).map(r=>({ r, m: matchReceta(r) })).filter(x=>x.m.pct>0).sort((a,b)=>b.m.pct-a.m.pct).slice(0,5);
+  const qc = document.getElementById('inicioQueCocino');
+  qc.innerHTML = `<div class="grupo-titulo">🍳 ¿Qué puedo cocinar?</div>` + (recetas.length ? recetas.map(({r,m})=>
+    `<div class="card" onclick="abrirRecetaDetalle('${r.ID}')" style="cursor:pointer"><div class="body">
+      <div class="titulo">${escAttr(r.Nombre)}</div>
+      <div class="meta">${m.pct}% de los ingredientes ${m.pct===100?'— ¡ya la puedes hacer!':''} ${m.faltan.length?('· falta: '+m.faltan.map(i=>i.nombre).join(', ')):''}</div>
+    </div></div>`
+  ).join('') : `<p class="hint">Agrega recetas e inventario para ver sugerencias aquí.</p>`);
+}
+async function pedirIdeaIA(){
+  const btn = document.getElementById('btnIdeaIA');
+  btn.disabled = true; btn.textContent = 'Pensando…';
+  const r = await apiPost('sugerirIdea', { usuario: usuarioActivo.ID });
+  btn.disabled = false; btn.textContent = '💡 Dame una idea';
+  const cont = document.getElementById('ideaResultado');
+  if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo generar una idea: ${escAttr(r.error||'sin conexión')}</p>`; return; }
+  const idea = r.idea;
+  window._ultimaIdeaIA = idea;
+  cont.innerHTML = `<div class="idea-card">
+    <div class="titulo" style="font-weight:700">${escAttr(idea.nombre||'Idea')}</div>
+    <div class="meta hint">⏱ ${idea.tiempoMin||'?'} min · 🍽 ${idea.porciones||'?'} porciones</div>
+    <p style="margin:8px 0 4px;font-weight:600">Ingredientes:</p>
+    <ul style="margin:0;padding-left:18px">${(idea.ingredientes||[]).map(i=>`<li>${escAttr(i.nombre)} ${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</li>`).join('')}</ul>
+    <p style="margin:8px 0 4px;font-weight:600">Pasos:</p>
+    <ol style="margin:0;padding-left:18px">${(idea.pasos||[]).map(p=>`<li>${escAttr(p)}</li>`).join('')}</ol>
+    <p class="hint" style="margin-top:8px">🤖 ${mensajeModelo(r,'Generado')}</p>
+    <button class="btn" style="margin-top:8px" onclick="guardarIdeaComoReceta()">💾 Guardar como receta</button>
+  </div>`;
+}
+async function guardarIdeaComoReceta(){
+  const idea = window._ultimaIdeaIA; if(!idea) return;
+  const row = {
+    ID: uid(), Nombre: idea.nombre||'Idea de la IA', Categoria: '', TiempoMin: idea.tiempoMin||'', Porciones: idea.porciones||'',
+    IngredientesJSON: JSON.stringify(idea.ingredientes||[]), Pasos: (idea.pasos||[]).join('\n'), FotoURL: '',
+    Favorito: false, Privado: false, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera: false
+  };
+  const r = await apiPost('saveRow', { table:'RECETAS', row });
+  if(!r.ok){ showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  DATA.recetas.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  showToast('✓ Receta guardada');
+  abrirRecetaDetalle(row.ID);
+}
+
+// ============================================================
+//  RECETAS
+// ============================================================
+function toggleSoloFavoritas(){ soloFavoritas = !soloFavoritas; document.getElementById('recetasFavBtn').classList.toggle('active', soloFavoritas); renderRecetas(); }
+function renderRecetas(){
+  if(!usuarioActivo) return;
+  const chips = ['Todas', ...categoriasOrdenadas().map(c=>c.Nombre)];
+  document.getElementById('recetasChips').innerHTML = chips.map(c=>
+    `<button class="chip ${c===recetasChipActivo?'active':''}" onclick="filtrarRecetasCategoria('${escAttr(c)}')">${c==='Todas'?'Todas':catEmoji(c)+' '+escAttr(c)}</button>`
+  ).join('');
+  const q = (document.getElementById('recetasBuscar').value||'').trim().toLowerCase();
+  let lista = activos(DATA.recetas);
+  if(recetasChipActivo!=='Todas') lista = lista.filter(r=>r.Categoria===recetasChipActivo);
+  if(soloFavoritas) lista = lista.filter(r=>esVerdadero(r.Favorito));
+  if(q) lista = lista.filter(r=>r.Nombre.toLowerCase().includes(q));
+  const grid = document.getElementById('recetasGrid');
+  if(!lista.length){ grid.innerHTML = `<p class="hint">No hay recetas todavía.</p>`; return; }
+  grid.innerHTML = lista.map(r=>{
+    const m = matchReceta(r);
+    const prom = promedioEstrellas(r.ID);
+    return `<div class="card" style="cursor:pointer" onclick="abrirRecetaDetalle('${r.ID}')">
+      ${r.FotoURL ? `<img class="thumb" src="${r.FotoURL}">` : `<div class="thumb ph">${catEmoji(r.Categoria)}</div>`}
+      <div class="body">
+        <div class="titulo">${esVerdadero(r.Favorito)?'⭐ ':''}${escAttr(r.Nombre)}</div>
+        <div class="meta">⏱ ${r.TiempoMin||'?'} min ${prom?(' · '+prom.toFixed(1)+'★'):''}</div>
+        <div class="meta">${m.pct}% de ingredientes disponibles</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function filtrarRecetasCategoria(c){ recetasChipActivo = c; renderRecetas(); }
+function findReceta(id){ return DATA.recetas.find(r=>r.ID===id); }
+
+function abrirRecetaDetalle(id){
+  const r = findReceta(id); if(!r) return;
+  const ings = parseIngredientes(r.IngredientesJSON);
+  const prom = promedioEstrellas(id);
+  const hist = historialDeReceta(id);
+  const faltantes = ings.map(i=>({i, m:tieneIngrediente(i)})).filter(x=>!x.m.tiene);
+  const html = `
+    <h3>${escAttr(r.Nombre)}</h3>
+    ${r.FotoURL ? `<img src="${r.FotoURL}" style="width:100%;border-radius:10px;margin-bottom:10px;cursor:zoom-in" onclick="verFotoGrande('${r.FotoURL}')">` : ''}
+    <p class="hint">${catEmoji(r.Categoria)} ${escAttr(r.Categoria||'Sin categoría')} · ⏱ ${r.TiempoMin||'?'} min · 🍽 ${r.Porciones||'?'} porciones ${prom?(' · '+estrellasHtml(prom,true)):''}</p>
+    <h3 style="margin-top:14px">Ingredientes</h3>
+    ${ings.map(i=>{ const m = tieneIngrediente(i); return `<div class="ing-row"><span class="nombre">${escAttr(i.nombre)}</span><span class="cant">${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</span><span class="badge ${m.tiene?'tiene':'falta'}">${m.tiene?'✓ lo tienes':'✗ te falta'}</span></div>`; }).join('') || '<p class="hint">Sin ingredientes cargados</p>'}
+    ${faltantes.length ? `<button class="btn secondary" style="margin-top:8px" onclick="agregarFaltantesALista('${id}')">🛒 Agregar faltantes a la lista</button>` : ''}
+    <h3 style="margin-top:14px">Pasos</h3>
+    <ol style="padding-left:18px">${(r.Pasos||'').split('\n').filter(Boolean).map(p=>`<li>${escAttr(p)}</li>`).join('') || '<p class="hint">Sin pasos cargados</p>'}</ol>
+    <div class="actions" style="justify-content:flex-start">
+      <button class="btn" onclick="abrirCocinarModal('${id}')">🍳 Cocinar ahora</button>
+      <button class="btn ghost" onclick="toggleFavoritoReceta('${id}')">${esVerdadero(r.Favorito)?'⭐ Quitar de favoritas':'☆ Marcar favorita'}</button>
+      <button class="btn ghost" onclick="cerrarModalYAbrir(()=>abrirEditorReceta('${id}'))">✏️ Editar</button>
+      <button class="btn danger" onclick="pedirEliminarReceta('${id}')">🗑 Eliminar</button>
+    </div>
+    <h3 style="margin-top:14px">Historial (${hist.length} vez${hist.length===1?'':'ces'} cocinada)</h3>
+    <div id="recetaHistorialCont">${renderHistorialHtml(hist)}</div>
+    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
+}
+function renderHistorialHtml(hist){
+  if(!hist.length) return '<p class="hint">Todavía no la has cocinado.</p>';
+  return hist.map(h=>`<div class="card"><div class="body">
+    ${h.FotoURL?`<img src="${h.FotoURL}" style="width:100%;border-radius:8px;margin-bottom:6px;cursor:zoom-in" onclick="verFotoGrande('${h.FotoURL}')">`:''}
+    <div class="meta">${fmtFecha(h.Fecha)} ${h.CocinadoPor?('· '+escAttr(h.CocinadoPor)):''}</div>
+    ${h.Estrellas?estrellasHtml(h.Estrellas,true):''}
+    ${h.Comentario?`<p style="margin:6px 0 0">${escAttr(h.Comentario)}</p>`:''}
+  </div></div>`).join('');
+}
+function cerrarModalYAbrir(fn){ document.querySelectorAll('.modal-overlay').forEach(o=>o.remove()); fn(); }
+
+async function toggleFavoritoReceta(id){
+  const r = findReceta(id); if(!r) return;
+  r.Favorito = !esVerdadero(r.Favorito);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderRecetas();
+  await apiPost('saveRow', { table:'RECETAS', row:r });
+}
+function pedirEliminarReceta(id){
+  confirmarEliminar('Esta receta se moverá a la papelera.', async ()=>{
+    const r = findReceta(id); if(!r) return;
+    r.Papelera = true;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    renderRecetas(); renderInicio();
+    await apiPost('saveRow', { table:'RECETAS', row:r });
+    showToast('Receta movida a la papelera');
+  });
+}
+async function agregarFaltantesALista(id){
+  const r = findReceta(id); if(!r) return;
+  const ings = parseIngredientes(r.IngredientesJSON);
+  const faltantes = ings.filter(i=>!tieneIngrediente(i).tiene);
+  for(const i of faltantes){
+    const row = { ID: uid(), Nombre: i.nombre, Categoria:'', Cantidad: i.cantidad||'', Unidad: i.unidad||'', Tienda:'', Comprado:false, RecetaOrigenID: id, Privado:false, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera:false };
+    DATA.lista_compras.push(row);
+    await apiPost('saveRow', { table:'LISTA_COMPRAS', row });
+  }
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  showToast(`✓ ${faltantes.length} item(s) agregados a la lista de compras`);
+}
+
+let editorIngredientes = [];
+function abrirEditorReceta(id){
+  const r = id ? findReceta(id) : null;
+  editorIngredientes = r ? parseIngredientes(r.IngredientesJSON) : [];
+  if(!editorIngredientes.length) editorIngredientes = [{nombre:'',cantidad:'',unidad:''}];
+  const html = `
+    <h3>${r?'✏️ Editar receta':'➕ Nueva receta'}</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="edNombre" value="${escAttr(r?r.Nombre:'')}"></div>
+    <div class="field-row">
+      <div class="field"><label>Categoría</label>${selectCategoriasHtml('edCategoria', r?r.Categoria:'')}</div>
+      <div class="field"><label>Tiempo (min)</label><input type="number" id="edTiempo" value="${r?escAttr(r.TiempoMin):''}"></div>
+    </div>
+    <div class="field"><label>Porciones</label><input type="number" id="edPorciones" value="${r?escAttr(r.Porciones):''}"></div>
+    <div class="field"><label>Foto</label>
+      <div id="edFotoActual">${r&&r.FotoURL?`<img src="${r.FotoURL}" style="width:100%;border-radius:8px;margin-bottom:6px">`:''}</div>
+      <input type="file" accept="image/*" id="edFotoInput" onchange="subirFotoDesdeInput(this.files,'edFotoCrop', url=>{ window._edFotoNueva=url; document.getElementById('edFotoActual').innerHTML='<img src=\\''+url+'\\' style=\\'width:100%;border-radius:8px\\'>'; document.getElementById('edFotoCrop').innerHTML=''; })">
+      <div id="edFotoCrop"></div>
+    </div>
+    <div class="field"><label>Ingredientes</label><div id="edIngredientes"></div>
+      <button type="button" class="btn ghost" style="margin-top:6px" onclick="editorAgregarIngrediente()">➕ Ingrediente</button>
+    </div>
+    <div class="field"><label>Pasos (uno por línea)</label><textarea id="edPasos" rows="5">${escAttr(r?r.Pasos:'')}</textarea></div>
+    <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="edPrivado" style="width:auto" ${r&&esVerdadero(r.Privado)?'checked':''}> 🔒 Privado (solo yo la veo)</label>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="edGuardarBtn" onclick="guardarReceta('${id||''}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+  renderEditorIngredientes();
+}
+function renderEditorIngredientes(){
+  document.getElementById('edIngredientes').innerHTML = editorIngredientes.map((ing,i)=>`
+    <div class="field-row" style="margin-bottom:6px">
+      <input type="text" placeholder="Ingrediente" value="${escAttr(ing.nombre)}" oninput="editorIngredientes[${i}].nombre=this.value">
+      <input type="text" placeholder="Cant." style="max-width:70px" value="${escAttr(ing.cantidad)}" oninput="editorIngredientes[${i}].cantidad=this.value">
+      <input type="text" placeholder="Unidad" style="max-width:80px" value="${escAttr(ing.unidad)}" oninput="editorIngredientes[${i}].unidad=this.value">
+      <button type="button" class="btn ghost" onclick="editorQuitarIngrediente(${i})">✕</button>
+    </div>`).join('');
+}
+function editorAgregarIngrediente(){ editorIngredientes.push({nombre:'',cantidad:'',unidad:''}); renderEditorIngredientes(); }
+function editorQuitarIngrediente(i){ editorIngredientes.splice(i,1); renderEditorIngredientes(); }
+async function guardarReceta(id){
+  const nombre = document.getElementById('edNombre').value.trim();
+  if(!nombre){ showToast('Falta el nombre de la receta'); return; }
+  const btn = document.getElementById('edGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const anterior = id ? findReceta(id) : null;
+  const row = {
+    ID: id || uid(),
+    Nombre: nombre,
+    Categoria: document.getElementById('edCategoria').value,
+    TiempoMin: document.getElementById('edTiempo').value,
+    Porciones: document.getElementById('edPorciones').value,
+    IngredientesJSON: JSON.stringify(editorIngredientes.filter(i=>i.nombre.trim())),
+    Pasos: document.getElementById('edPasos').value,
+    FotoURL: window._edFotoNueva || (anterior?anterior.FotoURL:'') || '',
+    Favorito: anterior ? anterior.Favorito : false,
+    Privado: document.getElementById('edPrivado').checked,
+    Usuario: anterior ? anterior.Usuario : usuarioActivo.ID,
+    FechaAlta: anterior ? anterior.FechaAlta : hoyLocalISO(),
+    Papelera: false
+  };
+  const r = await apiPost('saveRow', { table:'RECETAS', row });
+  window._edFotoNueva = null;
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  const idx = DATA.recetas.findIndex(x=>x.ID===row.ID);
+  if(idx>=0) DATA.recetas[idx] = row; else DATA.recetas.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderRecetas(); renderInicio();
+  showToast('Guardado');
+}
+
+// Cocinar ahora — historial con estrellas/comentario/foto + descuento opcional
+function abrirCocinarModal(recetaId){
+  const r = findReceta(recetaId); if(!r) return;
+  const ings = parseIngredientes(r.IngredientesJSON);
+  window._cocinarEstrellas = 0;
+  const html = `
+    <h3>🍳 Cocinar: ${escAttr(r.Nombre)}</h3>
+    <div class="field"><label>Fecha</label><input type="date" id="cocFecha" value="${hoyLocalISO()}"></div>
+    <div class="field"><label>Calificación</label><div id="cocEstrellas"></div></div>
+    <div class="field"><label>Comentario</label><textarea id="cocComentario" rows="2" placeholder="¿Cómo quedó?"></textarea></div>
+    <div class="field"><label>Foto (opcional)</label><div id="cocFotoCrop"></div><input type="file" accept="image/*" id="cocFotoInput" onchange="subirFotoDesdeInput(this.files,'cocFotoCrop', url=>{ window._cocFotoUrl=url; document.getElementById('cocFotoCrop').innerHTML='<img src=\\''+url+'\\' style=\\'width:100%;border-radius:8px\\'>'; })"></div>
+    ${ings.length ? `<label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="cocDescontar" style="width:auto" checked> 📉 Descontar ingredientes del inventario</label>` : ''}
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="cocGuardarBtn" onclick="guardarCocinado('${recetaId}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+  renderEstrellasWidget();
+}
+function renderEstrellasWidget(){
+  document.getElementById('cocEstrellas').innerHTML = `<span class="estrellas">` +
+    [1,2,3,4,5].map(n=>`<span class="${n<=window._cocinarEstrellas?'on':''}" onclick="window._cocinarEstrellas=${n};renderEstrellasWidget()">★</span>`).join('') + `</span>`;
+}
+async function guardarCocinado(recetaId){
+  const r = findReceta(recetaId); if(!r) return;
+  const btn = document.getElementById('cocGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const descontar = document.getElementById('cocDescontar') ? document.getElementById('cocDescontar').checked : false;
+  const ings = parseIngredientes(r.IngredientesJSON);
+  const body = {
+    recetaId, fecha: document.getElementById('cocFecha').value || hoyLocalISO(),
+    estrellas: window._cocinarEstrellas||'', comentario: document.getElementById('cocComentario').value,
+    fotoUrl: window._cocFotoUrl||'', cocinadoPor: usuarioActivo.Nombre,
+    descontarInventario: descontar, usuario: usuarioActivo.ID,
+    ingredientes: descontar ? ings : []
+  };
+  const res = await apiPost('registrarCocinado', body);
+  window._cocFotoUrl = null;
+  btn.disabled = false; btn.textContent = '💾 Guardar';
+  if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
+  DATA.recetas_historial.push(res.historial);
+  await refreshData();
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  if(res.noAlcanzo && res.noAlcanzo.length) showToast('Guardado — no había suficiente: '+res.noAlcanzo.map(x=>x.nombre).join(', '));
+  else showToast('✓ ¡Buen provecho!');
+  abrirRecetaDetalle(recetaId);
+}
+
+// ============================================================
+//  INVENTARIO
+// ============================================================
+function renderInventario(){
+  if(!usuarioActivo) return;
+  const lista = activos(DATA.inventario);
+  const cont = document.getElementById('inventarioLista');
+  if(!lista.length){ cont.innerHTML = '<p class="hint">Tu inventario está vacío.</p>'; return; }
+  const grupos = {};
+  lista.forEach(f=>{ const cat = f.Categoria||'Sin categoría'; (grupos[cat]=grupos[cat]||[]).push(f); });
+  const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
+  const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
+  cont.innerHTML = catsPresentes.map(cat=>{
+    const filas = grupos[cat].sort((a,b)=>(diasHasta(a.FechaCaducidad)??9999)-(diasHasta(b.FechaCaducidad)??9999));
+    return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + filas.map(f=>{
+      const u = urgenciaCaducidad(f.FechaCaducidad);
+      const d = diasHasta(f.FechaCaducidad);
+      const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
+      return `<div class="inv-item ${u}">
+        <div class="info">
+          <div class="nombre">${escAttr(f.Nombre)} ${esVerdadero(f.Privado)?'🔒':''}</div>
+          <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}</div>
+        </div>
+        <div class="acciones">
+          <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
+          <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
+          <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
+        </div>
+      </div>`;
+    }).join('');
+  }).join('');
+}
+function findInventario(id){ return DATA.inventario.find(f=>f.ID===id); }
+function abrirEditorInventario(id){
+  const f = id ? findInventario(id) : null;
+  const html = `
+    <h3>${f?'✏️ Editar item':'➕ Agregar al inventario'}</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="ivNombre" value="${escAttr(f?f.Nombre:'')}"></div>
+    <div class="field"><label>Categoría</label>${selectCategoriasHtml('ivCategoria', f?f.Categoria:'')}</div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="ivCantidad" value="${f?escAttr(f.Cantidad):''}"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="ivUnidad" placeholder="kg, pza, l…" value="${f?escAttr(f.Unidad):''}"></div>
+    </div>
+    <div class="field"><label>Caduca</label><input type="date" id="ivCaducidad" value="${f?escAttr(f.FechaCaducidad):''}"></div>
+    <div class="field"><label>Tienda</label><input type="text" id="ivTienda" value="${f?escAttr(f.Tienda):''}"></div>
+    <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="ivPrivado" style="width:auto" ${f&&esVerdadero(f.Privado)?'checked':''}> 🔒 Privado (solo yo lo veo)</label>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="ivGuardarBtn" onclick="guardarInventario('${id||''}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarInventario(id){
+  const nombre = document.getElementById('ivNombre').value.trim();
+  if(!nombre){ showToast('Falta el nombre'); return; }
+  const btn = document.getElementById('ivGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const anterior = id ? findInventario(id) : null;
+  const row = {
+    ID: id || uid(), Nombre: nombre, Categoria: document.getElementById('ivCategoria').value,
+    Cantidad: document.getElementById('ivCantidad').value, Unidad: document.getElementById('ivUnidad').value,
+    FechaCaducidad: document.getElementById('ivCaducidad').value, Tienda: document.getElementById('ivTienda').value,
+    Privado: document.getElementById('ivPrivado').checked, Usuario: anterior?anterior.Usuario:usuarioActivo.ID,
+    FechaAlta: anterior?anterior.FechaAlta:hoyLocalISO(), Papelera: false
+  };
+  const r = await apiPost('saveRow', { table:'INVENTARIO', row });
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  const idx = DATA.inventario.findIndex(x=>x.ID===row.ID);
+  if(idx>=0) DATA.inventario[idx]=row; else DATA.inventario.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderInventario(); renderInicio();
+  showToast('Guardado');
+}
+function pedirEliminarInventario(id){
+  confirmarEliminar('Este item se moverá a la papelera.', async ()=>{
+    const f = findInventario(id); if(!f) return;
+    f.Papelera = true;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderInventario(); renderInicio();
+    await apiPost('saveRow', { table:'INVENTARIO', row:f });
+    showToast('Movido a la papelera');
+  });
+}
+function precioBadgeTexto(c){
+  if(!c || c.estado==='sinHistorial') return { txt:'Primer precio registrado', clase:'normal' };
+  if(c.estado==='caro') return { txt:'🔺 Más caro que tu promedio ('+fmtMoneda(c.promedio)+')', clase:'caro' };
+  if(c.estado==='bueno') return { txt:'🔻 Buen precio (promedio '+fmtMoneda(c.promedio)+')', clase:'bueno' };
+  return { txt:'➖ Precio normal (promedio '+fmtMoneda(c.promedio)+')', clase:'normal' };
+}
+function abrirRegistrarPrecio(id){
+  const f = findInventario(id); if(!f) return;
+  const html = `
+    <h3>💲 Registrar precio: ${escAttr(f.Nombre)}</h3>
+    <div class="field"><label>Precio</label><input type="number" step="0.01" id="prPrecio" placeholder="0.00"></div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="prCantidad" value="${escAttr(f.Cantidad||'')}"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="prUnidad" value="${escAttr(f.Unidad||'')}"></div>
+    </div>
+    <div class="field"><label>Tienda</label><input type="text" id="prTienda" value="${escAttr(f.Tienda||'')}"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="prGuardarBtn" onclick="guardarPrecioManual('${escAttr(f.Nombre)}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarPrecioManual(itemNombre){
+  const precio = document.getElementById('prPrecio').value;
+  if(!precio){ showToast('Escribe un precio'); return; }
+  const btn = document.getElementById('prGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const r = await apiPost('registrarPrecio', {
+    item: itemNombre, precio, cantidad: document.getElementById('prCantidad').value,
+    unidad: document.getElementById('prUnidad').value, tienda: document.getElementById('prTienda').value,
+    fecha: hoyLocalISO(), usuario: usuarioActivo.ID
+  });
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  const b = precioBadgeTexto(r.comparacion);
+  showToast(b.txt);
+  refreshData();
+}
+
+// ============================================================
+//  LISTA DE COMPRAS
+// ============================================================
+function renderCompras(){
+  if(!usuarioActivo) return;
+  const lista = activos(DATA.lista_compras);
+  const cont = document.getElementById('comprasLista');
+  if(!lista.length){ cont.innerHTML = '<p class="hint">Tu lista de compras está vacía.</p>'; return; }
+  const pendientes = lista.filter(i=>!esVerdadero(i.Comprado));
+  const comprados = lista.filter(i=>esVerdadero(i.Comprado));
+  const grupos = {};
+  pendientes.forEach(i=>{ const cat = i.Categoria||'Sin categoría'; (grupos[cat]=grupos[cat]||[]).push(i); });
+  const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
+  const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
+  let html = catsPresentes.map(cat=>`<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` +
+    grupos[cat].map(i=>itemCompraHtml(i)).join('')).join('');
+  if(comprados.length) html += `<div class="grupo-titulo">✅ Comprados</div>` + comprados.map(i=>itemCompraHtml(i)).join('');
+  cont.innerHTML = html;
+}
+function itemCompraHtml(i){
+  const comprado = esVerdadero(i.Comprado);
+  return `<div class="compra-item ${comprado?'comprado':''}">
+    <button class="chk" onclick="${comprado?'':`abrirMarcarComprado('${i.ID}')`}">${comprado?'✓':''}</button>
+    <div class="info">
+      <div class="nombre">${escAttr(i.Nombre)} ${esVerdadero(i.Privado)?'🔒':''}</div>
+      <div class="meta">${escAttr(i.Cantidad||'')} ${escAttr(i.Unidad||'')}${i.Tienda?(' · '+escAttr(i.Tienda)):''}</div>
+    </div>
+    <button onclick="pedirEliminarCompra('${i.ID}')" title="Eliminar" style="background:none;border:none;color:var(--danger);font-size:16px">🗑</button>
+  </div>`;
+}
+function findCompra(id){ return DATA.lista_compras.find(i=>i.ID===id); }
+function abrirAgregarCompra(prefill){
+  const html = `
+    <h3>➕ Agregar a la lista</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="lcNombre" value="${prefill?escAttr(prefill.nombre):''}"></div>
+    <div class="field"><label>Categoría</label>${selectCategoriasHtml('lcCategoria','')}</div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="lcCantidad"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="lcUnidad"></div>
+    </div>
+    <div class="field"><label>Tienda (opcional)</label><input type="text" id="lcTienda"></div>
+    <label class="hint" style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" id="lcPrivado" style="width:auto"> 🔒 Privado (solo yo lo veo)</label>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="lcGuardarBtn" onclick="guardarItemLista()">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarItemLista(){
+  const nombre = document.getElementById('lcNombre').value.trim();
+  if(!nombre){ showToast('Falta el nombre'); return; }
+  const btn = document.getElementById('lcGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const row = {
+    ID: uid(), Nombre: nombre, Categoria: document.getElementById('lcCategoria').value,
+    Cantidad: document.getElementById('lcCantidad').value, Unidad: document.getElementById('lcUnidad').value,
+    Tienda: document.getElementById('lcTienda').value, Comprado:false, RecetaOrigenID:'',
+    Privado: document.getElementById('lcPrivado').checked, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera:false
+  };
+  const r = await apiPost('saveRow', { table:'LISTA_COMPRAS', row });
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  DATA.lista_compras.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCompras();
+  showToast('Agregado a la lista');
+}
+function pedirEliminarCompra(id){
+  confirmarEliminar('Este item se moverá a la papelera.', async ()=>{
+    const i = findCompra(id); if(!i) return;
+    i.Papelera = true;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderCompras();
+    await apiPost('saveRow', { table:'LISTA_COMPRAS', row:i });
+  });
+}
+function abrirMarcarComprado(id){
+  const i = findCompra(id); if(!i) return;
+  const html = `
+    <h3>✅ Comprado: ${escAttr(i.Nombre)}</h3>
+    <div class="field"><label>Precio pagado</label><input type="number" step="0.01" id="mcPrecio" placeholder="0.00"></div>
+    <div class="field-row">
+      <div class="field"><label>Cantidad</label><input type="text" id="mcCantidad" value="${escAttr(i.Cantidad||'')}"></div>
+      <div class="field"><label>Unidad</label><input type="text" id="mcUnidad" value="${escAttr(i.Unidad||'')}"></div>
+    </div>
+    <div class="field"><label>Tienda</label><input type="text" id="mcTienda" value="${escAttr(i.Tienda||'')}"></div>
+    <div class="field"><label>Caduca (opcional)</label><input type="date" id="mcCaducidad"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="mcGuardarBtn" onclick="confirmarCompra('${id}')">💾 Confirmar compra</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function confirmarCompra(id){
+  const i = findCompra(id); if(!i) return;
+  const btn = document.getElementById('mcGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const body = {
+    listaId: id, nombre: i.Nombre, categoria: i.Categoria,
+    cantidad: document.getElementById('mcCantidad').value, unidad: document.getElementById('mcUnidad').value,
+    tienda: document.getElementById('mcTienda').value, precio: document.getElementById('mcPrecio').value,
+    fechaCaducidad: document.getElementById('mcCaducidad').value, privado: esVerdadero(i.Privado),
+    usuario: usuarioActivo.ID, fecha: hoyLocalISO()
+  };
+  const r = await apiPost('registrarCompra', body);
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Confirmar compra'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  await refreshData();
+  const b = precioBadgeTexto(r.comparacion);
+  showToast('✓ Agregado al inventario' + (r.comparacion && r.comparacion.estado!=='sinHistorial' ? ' — '+b.txt : ''));
+}
+async function limpiarComprados(){
+  const comprados = activos(DATA.lista_compras).filter(i=>esVerdadero(i.Comprado));
+  if(!comprados.length){ showToast('No hay comprados que limpiar'); return; }
+  confirmarEliminar('Se moverán '+comprados.length+' item(s) comprados a la papelera.', async ()=>{
+    for(const i of comprados){ i.Papelera = true; await apiPost('saveRow', { table:'LISTA_COMPRAS', row:i }); }
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderCompras();
+    showToast('Limpio');
+  });
+}
+
+// ============================================================
+//  CALENDARIO
+// ============================================================
+const SLOTS = ['Desayuno','Comida','Cena','Snack'];
+function renderCalendario(){
+  if(!usuarioActivo) return;
+  const dias = [];
+  const base = new Date(hoyLocalISO()+'T00:00:00');
+  for(let i=0;i<7;i++){ const d = new Date(base); d.setDate(base.getDate()+i); dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')); }
+  const entradas = activos(DATA.calendario);
+  document.getElementById('calendarioLista').innerHTML = dias.map((fecha,i)=>{
+    const etiqueta = i===0?'Hoy':i===1?'Mañana':new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>` +
+      SLOTS.map(slot=>{
+        const entry = entradas.find(e=>e.Fecha===fecha && e.Slot===slot);
+        if(!entry) return `<div class="slot-row vacio" onclick="abrirAsignarSlot('${fecha}','${slot}')"><span class="slot-nombre">${slot}</span><span class="slot-contenido hint">+ Agregar</span></div>`;
+        const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
+        return `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${slot}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
+      }).join('') + `</div>`;
+  }).join('');
+}
+function abrirAsignarSlot(fecha, slot){
+  const recetas = activos(DATA.recetas);
+  const html = `
+    <h3>${slot} — ${fmtFecha(fecha)}</h3>
+    <div class="field"><label>Receta</label>
+      <select id="calReceta"><option value="">— Texto libre —</option>${recetas.map(r=>`<option value="${r.ID}">${escAttr(r.Nombre)}</option>`).join('')}</select>
+    </div>
+    <div class="field"><label>O escribe algo libre</label><input type="text" id="calTexto" placeholder="ej: comer fuera"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="calGuardarBtn" onclick="guardarAsignacion('${fecha}','${slot}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarAsignacion(fecha, slot){
+  const recetaId = document.getElementById('calReceta').value;
+  const texto = document.getElementById('calTexto').value.trim();
+  if(!recetaId && !texto){ showToast('Elige una receta o escribe algo'); return; }
+  const btn = document.getElementById('calGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const row = { ID: uid(), Fecha: fecha, Slot: slot, RecetaID: recetaId||'', TextoLibre: recetaId?'':texto, Cocinado:false, Privado:false, Usuario: usuarioActivo.ID, Papelera:false };
+  const r = await apiPost('saveRow', { table:'CALENDARIO', row });
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  DATA.calendario.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCalendario();
+}
+function abrirAccionesSlot(entryId){
+  const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
+  const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
+  const html = `
+    <h3>${escAttr(entry.Slot)} — ${fmtFecha(entry.Fecha)}</h3>
+    <p>${escAttr(nombre)}</p>
+    <div class="actions" style="justify-content:flex-start">
+      ${entry.RecetaID && !esVerdadero(entry.Cocinado) ? `<button class="btn" onclick="cerrarModalYAbrir(()=>abrirCocinarDesdeCalendario('${entry.ID}'))">🍳 Marcar cocinado</button>` : ''}
+      ${!entry.RecetaID ? `<button class="btn ${esVerdadero(entry.Cocinado)?'secondary':''}" onclick="toggleCocinadoLibre('${entry.ID}')">${esVerdadero(entry.Cocinado)?'✓ Hecho':'Marcar hecho'}</button>` : ''}
+      <button class="btn danger" onclick="quitarAsignacion('${entry.ID}')">🗑 Quitar</button>
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
+    </div>`;
+  abrirModal(html);
+}
+function abrirCocinarDesdeCalendario(entryId){ window._calendarioEntryPendiente = entryId; const entry = DATA.calendario.find(e=>e.ID===entryId); abrirCocinarModal(entry.RecetaID); }
+async function toggleCocinadoLibre(entryId){
+  const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
+  entry.Cocinado = !esVerdadero(entry.Cocinado);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCalendario();
+  await apiPost('saveRow', { table:'CALENDARIO', row:entry });
+}
+async function quitarAsignacion(entryId){
+  const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
+  entry.Papelera = true;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderCalendario();
+  await apiPost('saveRow', { table:'CALENDARIO', row:entry });
+}
+// Si "Cocinar ahora" se abrió desde el Calendario, al guardar también se
+// marca esa entrada del día como cocinada (mismo historial, un solo flujo).
+const _guardarCocinadoOriginal = guardarCocinado;
+guardarCocinado = async function(recetaId){
+  await _guardarCocinadoOriginal(recetaId);
+  const entryId = window._calendarioEntryPendiente;
+  if(entryId){
+    window._calendarioEntryPendiente = null;
+    const entry = DATA.calendario.find(e=>e.ID===entryId);
+    if(entry){ entry.Cocinado = true; localStorage.setItem('comidas_data_cache', JSON.stringify(DATA)); await apiPost('saveRow', { table:'CALENDARIO', row:entry }); renderCalendario(); }
+  }
+};
+
+// ============================================================
+//  CONFIGURACIÓN
+// ============================================================
+function renderConfig(){
+  if(!usuarioActivo) return;
+  document.getElementById('cfgUsuarioActivo').textContent = usuarioActivo.Nombre;
+  document.getElementById('cfgVersion').textContent = BUILD_VERSION;
+  document.getElementById('cfgSheetLink').innerHTML = SHEET_URL ? `<a href="${SHEET_URL}" target="_blank" rel="noopener">📄 Ver / exportar mis datos (Google Sheet)</a>` : '';
+
+  document.getElementById('cfgUsuariosLista').innerHTML = usuariosActivos().map(u=>`
+    <div class="userlist-row">
+      <span class="nombre">${escAttr(u.Nombre)}${u.ID===usuarioActivo.ID?' (tú)':''} ${u.Password?'🔒':''}</span>
+      <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="editarUsuarioConfig('${u.ID}')">✏️</button>
+      <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="eliminarUsuarioConfig('${u.ID}')">🗑</button>
+    </div>`).join('');
+
+  document.getElementById('cfgCategoriasLista').innerHTML = categoriasOrdenadas().map((c,i,arr)=>`
+    <div class="cat-row">
+      <input type="text" class="emoji-in" value="${escAttr(c.Emoji)}" onchange="editarCategoriaCampo('${c.ID}','Emoji',this.value)">
+      <input type="text" value="${escAttr(c.Nombre)}" onchange="editarCategoriaCampo('${c.ID}','Nombre',this.value)">
+      <button class="btn ghost" style="font-size:12px;padding:4px 8px" ${i===0?'disabled':''} onclick="moverCategoria('${c.ID}',-1)">↑</button>
+      <button class="btn ghost" style="font-size:12px;padding:4px 8px" ${i===arr.length-1?'disabled':''} onclick="moverCategoria('${c.ID}',1)">↓</button>
+      <button class="btn ghost" style="font-size:12px;padding:4px 8px" onclick="eliminarCategoria('${c.ID}')">🗑</button>
+    </div>`).join('');
+
+  const cfg = DATA.config.find(c=>c.ID==='config');
+  const ta = document.getElementById('cfgNotas');
+  if(document.activeElement !== ta) ta.value = cfg ? (cfg.Notas||'') : '';
+
+  renderPapeleraConfig();
+}
+
+function abrirNuevoUsuarioConfig(){
+  const html = `
+    <h3>➕ Nuevo usuario</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="cfgNuevoNombre"></div>
+    <div class="field"><label>Contraseña (opcional)</label><input type="password" id="cfgNuevoPass"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" onclick="guardarNuevoUsuarioConfig()">💾 Crear</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarNuevoUsuarioConfig(){
+  const nombre = document.getElementById('cfgNuevoNombre').value.trim();
+  if(!nombre){ showToast('Escribe un nombre'); return; }
+  const row = { ID: uid(), Nombre: nombre, Password: document.getElementById('cfgNuevoPass').value||'', Papelera:false };
+  const r = await apiPost('saveRow', { table:'USUARIOS', row });
+  if(!r.ok){ showToast('No se pudo crear: '+(r.error||'sin conexión')); return; }
+  DATA.usuarios.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderConfig();
+  showToast('Usuario creado');
+}
+function editarUsuarioConfig(id){
+  const u = DATA.usuarios.find(x=>x.ID===id); if(!u) return;
+  const html = `
+    <h3>✏️ ${escAttr(u.Nombre)}</h3>
+    <div class="field"><label>Nombre</label><input type="text" id="cfgEdNombre" value="${escAttr(u.Nombre)}"></div>
+    <div class="field"><label>Contraseña (vacío = sin contraseña)</label><input type="password" id="cfgEdPass" value="${escAttr(u.Password)}"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" onclick="guardarUsuarioConfig('${id}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarUsuarioConfig(id){
+  const u = DATA.usuarios.find(x=>x.ID===id); if(!u) return;
+  u.Nombre = document.getElementById('cfgEdNombre').value.trim() || u.Nombre;
+  u.Password = document.getElementById('cfgEdPass').value;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  if(usuarioActivo.ID===id){ usuarioActivo = u; document.getElementById('userBtnHeader').textContent = '👤 '+u.Nombre; }
+  renderConfig();
+  await apiPost('saveRow', { table:'USUARIOS', row:u });
+  showToast('Guardado');
+}
+function eliminarUsuarioConfig(id){
+  if(id===usuarioActivo.ID){ showToast('No puedes eliminar tu propio usuario activo'); return; }
+  confirmarEliminar('Este usuario se moverá a la papelera (sus datos no se borran).', async ()=>{
+    const u = DATA.usuarios.find(x=>x.ID===id); if(!u) return;
+    u.Papelera = true;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderConfig();
+    await apiPost('saveRow', { table:'USUARIOS', row:u });
+  });
+}
+
+async function agregarCategoria(){
+  const row = { ID: uid(), Nombre:'Nueva categoría', Emoji:'🍽️', Orden: categoriasOrdenadas().length, Papelera:false };
+  DATA.categorias.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  renderConfig();
+  await apiPost('saveRow', { table:'CATEGORIAS', row });
+}
+async function editarCategoriaCampo(id, campo, valor){
+  const c = DATA.categorias.find(x=>x.ID===id); if(!c) return;
+  c[campo] = valor;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  await apiPost('saveRow', { table:'CATEGORIAS', row:c });
+  renderRecetas(); renderInventario(); renderCompras();
+}
+async function moverCategoria(id, delta){
+  const ordenadas = categoriasOrdenadas();
+  const i = ordenadas.findIndex(c=>c.ID===id);
+  const j = i+delta;
+  if(j<0 || j>=ordenadas.length) return;
+  const a = ordenadas[i], b = ordenadas[j];
+  const tmp = a.Orden; a.Orden = b.Orden; b.Orden = tmp;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  renderConfig();
+  await apiPost('saveRow', { table:'CATEGORIAS', row:a });
+  await apiPost('saveRow', { table:'CATEGORIAS', row:b });
+}
+function eliminarCategoria(id){
+  confirmarEliminar('Esta categoría se moverá a la papelera (los items que la usan no se borran).', async ()=>{
+    const c = DATA.categorias.find(x=>x.ID===id); if(!c) return;
+    c.Papelera = true;
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderConfig();
+    await apiPost('saveRow', { table:'CATEGORIAS', row:c });
+  });
+}
+
+let notasGuardarTimer = null;
+function onNotasInput(){
+  const estado = document.getElementById('cfgNotasEstado');
+  if(estado) estado.textContent = 'Escribiendo…';
+  clearTimeout(notasGuardarTimer);
+  notasGuardarTimer = setTimeout(guardarNotasConfig, 800);
+}
+async function guardarNotasConfig(){
+  const ta = document.getElementById('cfgNotas'); if(!ta) return;
+  const val = ta.value;
+  const row = { ID:'config', Notas: val };
+  const idx = DATA.config.findIndex(c=>c.ID==='config');
+  if(idx>=0) DATA.config[idx] = row; else DATA.config.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  const estado = document.getElementById('cfgNotasEstado');
+  if(estado) estado.textContent = 'Guardando…';
+  const r = await apiPost('saveRow', { table:'CONFIG', row });
+  if(!estado) return;
+  estado.textContent = r.ok ? 'Guardado ✓' : '⚠️ No se pudo guardar (sin conexión)';
+  if(r.ok) setTimeout(()=>{ if(estado.textContent==='Guardado ✓') estado.textContent=''; }, 2000);
+}
+function copiarNotas(){
+  const ta = document.getElementById('cfgNotas'); if(!ta) return;
+  navigator.clipboard.writeText(ta.value).then(()=>showToast('Notas copiadas')).catch(()=>showToast('No se pudo copiar'));
+}
+function limpiarNotas(){
+  const ta = document.getElementById('cfgNotas'); if(!ta || !ta.value.trim()){ showToast('No hay notas que borrar'); return; }
+  confirmarEliminar('Se van a borrar todas las notas.', ()=>{ ta.value=''; guardarNotasConfig(); });
+}
+
+function renderPapeleraConfig(){
+  const items = [];
+  DATA.recetas.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'RECETAS', nombre:r.Nombre, row:r}));
+  DATA.inventario.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'INVENTARIO', nombre:r.Nombre, row:r}));
+  DATA.lista_compras.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'LISTA_COMPRAS', nombre:r.Nombre, row:r}));
+  DATA.usuarios.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'USUARIOS', nombre:r.Nombre, row:r}));
+  const cont = document.getElementById('cfgPapelera');
+  if(!items.length){ cont.innerHTML = '<p class="hint">La papelera está vacía.</p>'; return; }
+  cont.innerHTML = items.map(it=>`<div class="userlist-row">
+    <span class="nombre">${escAttr(it.nombre)} <span class="hint">(${it.tabla.toLowerCase()})</span></span>
+    <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="restaurarPapelera('${it.tabla}','${it.row.ID}')">♻️</button>
+    <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="borrarParaSiempre('${it.tabla}','${it.row.ID}')">🗑</button>
+  </div>`).join('');
+}
+async function restaurarPapelera(tabla, id){
+  const arr = DATA[tabla.toLowerCase()];
+  const row = arr.find(x=>x.ID===id); if(!row) return;
+  row.Papelera = false;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  renderConfig(); renderAllScreens();
+  await apiPost('saveRow', { table: tabla, row });
+  showToast('Restaurado');
+}
+function borrarParaSiempre(tabla, id){
+  confirmarEliminar('Esto se borra para siempre y no se puede deshacer.', async ()=>{
+    const arr = DATA[tabla.toLowerCase()];
+    const idx = arr.findIndex(x=>x.ID===id);
+    if(idx>=0) arr.splice(idx,1);
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    renderConfig();
+    await apiPost('deleteRow', { table: tabla, id });
+    showToast('Borrado para siempre');
+  });
+}
+
+// ============================================================
+//  Arranque
+// ============================================================
+boot();
+</script>
+</body>
+</html>
