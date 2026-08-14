@@ -210,7 +210,10 @@ nav.tabbar button .ic{font-size:18px}
       <h2>🥕 Ingredientes</h2>
       <div class="searchbar"><input type="text" id="ingredientesBuscar" placeholder="Buscar ingrediente…" oninput="renderInventario()"></div>
       <div id="inventarioLista"></div>
-      <button class="btn block" style="margin-top:14px" onclick="abrirEditorInventario(null)">➕ Agregar ingrediente</button>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+        <button class="btn" style="flex:1" onclick="abrirEditorInventario(null)">➕ Agregar ingrediente</button>
+        <button class="btn ghost" style="flex:1" onclick="abrirBuscarDuplicados()">🔀 Buscar duplicados</button>
+      </div>
     </div>
 
     <div id="screen-compras" class="screen">
@@ -299,7 +302,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chihuahua';
+const BUILD_VERSION = 'Sinaloa';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -853,6 +856,15 @@ function unidadSelectHtml(id, seleccion){
   return `<select id="${id}">` +
     UNIDADES_GASTOS.map(u=>`<option value="${u}" ${u===seleccion?'selected':''}>${u}</option>`).join('') +
     `</select>`;
+}
+// Autocompletar con los nombres que YA existen en el inventario — para
+// que al escribir "Tortillas de maíz La Corona" otra vez, el navegador lo
+// sugiera y se reutilice el mismo nombre/escritura en vez de crear un
+// duplicado con una redacción ligeramente distinta (causa real de varios
+// "duplicados" que en realidad eran el mismo producto escrito distinto).
+function datalistNombresIngredientesHtml(){
+  const nombres = Array.from(new Set(DATA.inventario.filter(f=>!esVerdadero(f.Papelera)).map(f=>f.Nombre))).sort((a,b)=>a.localeCompare(b,'es'));
+  return `<datalist id="listaNombresIngredientes">${nombres.map(n=>`<option value="${escAttr(n)}">`).join('')}</datalist>`;
 }
 function selectCategoriasHtml(id, seleccion){
   return `<select id="${id}"><option value="">Sin categoría</option>` +
@@ -1514,6 +1526,70 @@ async function guardarCocinado(recetaId){
 // tienen ninguna fila de inventario que los cubra — "te faltan pero ya
 // sabes en qué platillo entrarían" — pedido explícito del usuario: que
 // también aparezcan aquí, no solo lo que ya tienes comprado.
+// ── Buscar posibles duplicados con nombre distinto (ej. "Verduras
+// mixtas" vs "Mix de verduras") — el agrupado por nombre exacto de
+// renderInventario ya junta los que se llaman IGUAL; esto es para los que
+// son lo mismo pero están escritos distinto. Heurística simple: cuánto se
+// parecen las palabras de cada nombre (no es perfecto, es para sugerir,
+// no para fusionar solo).
+function tokensDeNombre(nombre){
+  // Ojo: normalizarNombre() solo le quita la "s" a la ÚLTIMA palabra de
+  // TODO el string (está pensada para nombres de un ingrediente, no para
+  // comparar frase contra frase) — aquí hace falta singularizar CADA
+  // palabra por separado antes de comparar, si no "verduras" (de "Verduras
+  // mixtas") nunca hace match con "verdura" (de "Mix de verduras").
+  const singular = t => (t.length>3 && t.endsWith('es')) ? t.slice(0,-2) : ((t.length>3 && t.endsWith('s')) ? t.slice(0,-1) : t);
+  return new Set(String(nombre).toLowerCase().trim().normalize('NFD').replace(/[̀-ͯ]/g,'')
+    .split(/\s+/).map(singular).filter(t=>t.length>2));
+}
+function similitudNombres(a,b){
+  const ta = tokensDeNombre(a), tb = tokensDeNombre(b);
+  if(!ta.size || !tb.size) return 0;
+  let comunes = 0;
+  ta.forEach(t=>{ if(tb.has(t)) comunes++; });
+  return comunes / Math.min(ta.size, tb.size);
+}
+function abrirBuscarDuplicados(){
+  const nombresUnicos = Array.from(new Set(activos(DATA.inventario).map(f=>f.Nombre)));
+  const pares = [];
+  for(let i=0;i<nombresUnicos.length;i++){
+    for(let j=i+1;j<nombresUnicos.length;j++){
+      const a = nombresUnicos[i], b = nombresUnicos[j];
+      if(normalizarNombre(a)===normalizarNombre(b)) continue; // esos ya se agrupan solos
+      const sim = similitudNombres(a,b);
+      if(sim>=0.5) pares.push({a,b,sim});
+    }
+  }
+  pares.sort((x,y)=>y.sim-x.sim);
+  const html = `<h3>🔀 Posibles duplicados</h3>
+    <p class="hint">Nombres distintos que podrían ser el mismo producto — revísalos, esto es solo una sugerencia (no es perfecto).</p>
+    <div id="duplicadosCont">${pares.length ? pares.map(p=>`
+      <div class="card"><div class="body">
+        <div>${escAttr(p.a)}</div>
+        <div class="hint">¿es lo mismo que...?</div>
+        <div>${escAttr(p.b)}</div>
+        <div class="actions" style="justify-content:flex-start;margin-top:8px">
+          <button class="btn secondary" onclick="fusionarIngredientes('${escAttr(p.a)}','${escAttr(p.b)}')">Fusionar en "${escAttr(p.a)}"</button>
+          <button class="btn secondary" onclick="fusionarIngredientes('${escAttr(p.b)}','${escAttr(p.a)}')">Fusionar en "${escAttr(p.b)}"</button>
+        </div>
+      </div></div>`).join('') : '<p class="hint">No se encontró ningún par parecido — bien ahí 👍</p>'}</div>
+    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
+}
+// Renombra TODOS los lotes de "descartado" al nombre de "canonico" — así
+// se agrupan solos la próxima vez que se renderice la lista. Ojo: esto no
+// corrige el texto de ingredientes ya escrito dentro de tus recetas.
+async function fusionarIngredientes(canonico, descartado){
+  const lotes = activos(DATA.inventario).filter(f=>f.Nombre===descartado);
+  if(!lotes.length){ showToast('Ya no hay lotes con ese nombre'); return; }
+  for(const f of lotes){
+    f.Nombre = canonico;
+    await apiPost('guardarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, row: { ID: f.ID, Nombre: canonico, Categoria: f.Categoria, Cantidad: f.Cantidad, Unidad: f.Unidad, FechaCaducidad: f.FechaCaducidad, Tienda: f.Tienda, Marca: f.Marca, Codigo: f.Codigo, Piezas: f.Piezas } });
+  }
+  showToast(`✓ Fusionado (${lotes.length} lote${lotes.length===1?'':'s'})`);
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  await refreshData();
+}
 function ingredientesSinStock(){
   const stockNorm = new Set(activos(DATA.inventario).map(f=>normalizarNombre(f.Nombre)));
   const vistos = new Map();
@@ -1525,6 +1601,50 @@ function ingredientesSinStock(){
     });
   });
   return Array.from(vistos.entries()).map(([norm,nombre])=>({norm,nombre}));
+}
+let gruposIngExpandido = new Set();
+function toggleGrupoIngrediente(key){
+  if(gruposIngExpandido.has(key)) gruposIngExpandido.delete(key); else gruposIngExpandido.add(key);
+  renderInventario();
+}
+function loteRowHtml(f, chico){
+  const u = urgenciaCaducidad(f.FechaCaducidad);
+  const d = diasHasta(f.FechaCaducidad);
+  const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
+  return `<div class="inv-item ${u}" ${chico?'style="margin-left:16px"':''}>
+    <div class="info">
+      <div class="nombre">${escAttr(f.Nombre)}${f.Marca?(' <span class="hint">'+escAttr(f.Marca)+'</span>'):''}</div>
+      <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Piezas?(' × '+escAttr(f.Piezas)):''}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}${f.Precio?(' · '+fmtMoneda(f.Precio)):''}</div>
+    </div>
+    <div class="acciones">
+      ${chico?'':'<button onclick="abrirRecetasConIngrediente(\''+escAttr(f.Nombre)+'\')" title="Ver recetas con este ingrediente">🍽</button><button onclick="abrirHistoricoPrecio(\''+escAttr(f.Nombre)+'\')" title="Histórico de precio">📈</button>'}
+      <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
+      <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
+      <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
+    </div>
+  </div>`;
+}
+function loteHtmlDeGrupo(lotes){
+  if(lotes.length===1) return loteRowHtml(lotes[0]);
+  const f0 = lotes[0];
+  const key = normalizarNombre(f0.Nombre);
+  const expandido = gruposIngExpandido.has(key);
+  const urgencias = lotes.map(f=>urgenciaCaducidad(f.FechaCaducidad));
+  const peorUrgencia = urgencias.includes('vencido') ? 'vencido' : urgencias.includes('pronto') ? 'pronto' : urgencias.includes('ok') ? 'ok' : 'sin';
+  const mismaUnidad = lotes.every(f=>(f.Unidad||'')===(f0.Unidad||'') && f.Unidad);
+  const totalCantidad = mismaUnidad ? lotes.reduce((s,f)=>s+(parseFloat(f.Cantidad)||0),0) : null;
+  const resumen = (totalCantidad!==null ? `${totalCantidad} ${escAttr(f0.Unidad)} · ` : '') + `${lotes.length} lotes`;
+  return `<div class="inv-item ${peorUrgencia} inv-grupo-header" onclick="toggleGrupoIngrediente('${key}')">
+    <div class="info">
+      <div class="nombre">${escAttr(f0.Nombre)}${f0.Marca?(' <span class="hint">'+escAttr(f0.Marca)+'</span>'):''}</div>
+      <div class="meta">${resumen}</div>
+    </div>
+    <div class="acciones">
+      <button onclick="event.stopPropagation();abrirRecetasConIngrediente('${escAttr(f0.Nombre)}')" title="Ver recetas con este ingrediente">🍽</button>
+      <button onclick="event.stopPropagation();abrirHistoricoPrecio('${escAttr(f0.Nombre)}')" title="Histórico de precio">📈</button>
+      <span style="padding:6px;font-size:14px">${expandido?'▲':'▼'}</span>
+    </div>
+  </div>` + (expandido ? lotes.map(f=>loteRowHtml(f, true)).join('') : '');
 }
 function renderInventario(){
   if(!usuarioActivo) return;
@@ -1548,25 +1668,20 @@ function renderInventario(){
     const orden = ['Sin categoría', ...categoriasOrdenadas().map(c=>c.Nombre)];
     const catsPresentes = Object.keys(grupos).sort((a,b)=>orden.indexOf(a)-orden.indexOf(b));
     html += catsPresentes.map(cat=>{
-      const filas = grupos[cat].sort((a,b)=>a.Nombre.localeCompare(b.Nombre,'es'));
-      return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + filas.map(f=>{
-        const u = urgenciaCaducidad(f.FechaCaducidad);
-        const d = diasHasta(f.FechaCaducidad);
-        const metaCad = d===null ? '' : (d<0?(' · venció hace '+Math.abs(d)+'d'):(' · caduca en '+d+'d'));
-        return `<div class="inv-item ${u}">
-          <div class="info">
-            <div class="nombre">${escAttr(f.Nombre)}${f.Marca?(' <span class="hint">'+escAttr(f.Marca)+'</span>'):''}</div>
-            <div class="meta">${escAttr(f.Cantidad||'')} ${escAttr(f.Unidad||'')}${f.Piezas?(' × '+escAttr(f.Piezas)):''}${f.Tienda?(' · '+escAttr(f.Tienda)):''}${metaCad}${f.Precio?(' · '+fmtMoneda(f.Precio)):''}</div>
-          </div>
-          <div class="acciones">
-            <button onclick="abrirRecetasConIngrediente('${escAttr(f.Nombre)}')" title="Ver recetas con este ingrediente">🍽</button>
-            <button onclick="abrirHistoricoPrecio('${escAttr(f.Nombre)}')" title="Histórico de precio">📈</button>
-            <button onclick="abrirRegistrarPrecio('${f.ID}')" title="Registrar precio">💲</button>
-            <button onclick="abrirEditorInventario('${f.ID}')" title="Editar">✏️</button>
-            <button onclick="pedirEliminarInventario('${f.ID}')" title="Eliminar">🗑</button>
-          </div>
-        </div>`;
-      }).join('');
+      // Agrupa por NOMBRE dentro de la categoría — antes cada compra
+      // (cada lote) salía como su propia fila suelta, y con caducidades
+      // distintas eso se veía como si fueran productos duplicados. Ahora
+      // los lotes del mismo producto se juntan en una tarjeta con los
+      // lotes plegables (importante seguir viéndolos por separado: cada
+      // uno puede tener su propia caducidad/precio/tienda).
+      const gruposNombre = new Map();
+      grupos[cat].forEach(f=>{
+        const key = normalizarNombre(f.Nombre);
+        if(!gruposNombre.has(key)) gruposNombre.set(key, []);
+        gruposNombre.get(key).push(f);
+      });
+      const listaGrupos = Array.from(gruposNombre.values()).sort((a,b)=>a[0].Nombre.localeCompare(b[0].Nombre,'es'));
+      return `<div class="grupo-titulo">${catEmoji(cat)} ${escAttr(cat)}</div>` + listaGrupos.map(loteHtmlDeGrupo).join('');
     }).join('');
   }
   if(sinStock.length){
@@ -1617,7 +1732,7 @@ function abrirEditorInventario(id){
       </div>
       <div class="hint" id="ivCodigoEstado" style="margin-top:4px"></div>
     </div>
-    <div class="field"><label>Nombre</label><input type="text" id="ivNombre" value="${escAttr(f?f.Nombre:'')}"></div>
+    <div class="field"><label>Nombre</label><input type="text" id="ivNombre" list="listaNombresIngredientes" value="${escAttr(f?f.Nombre:'')}">${datalistNombresIngredientesHtml()}</div>
     <div class="field"><label>Marca (opcional)</label><input type="text" id="ivMarca" value="${f?escAttr(f.Marca):''}"></div>
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('ivCategoria', f?f.Categoria:'')}</div>
     <div class="field-row">
@@ -1854,7 +1969,7 @@ function abrirAgregarCompra(id){
   const item = id ? findCompra(id) : null;
   const html = `
     <h3>${item?'✏️ Editar item':'➕ Agregar a la lista'}</h3>
-    <div class="field"><label>Nombre</label><input type="text" id="lcNombre" value="${item?escAttr(item.Nombre):''}"></div>
+    <div class="field"><label>Nombre</label><input type="text" id="lcNombre" list="listaNombresIngredientes" value="${item?escAttr(item.Nombre):''}">${datalistNombresIngredientesHtml()}</div>
     <div class="field"><label>Categoría</label>${selectCategoriasHtml('lcCategoria', item?item.Categoria:'')}</div>
     <div class="field"><label>Tienda (opcional)</label><input type="text" id="lcTienda" value="${item?escAttr(item.Tienda):''}"></div>
     <div class="actions">
