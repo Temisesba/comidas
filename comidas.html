@@ -140,7 +140,7 @@ nav.tabbar button .ic{font-size:18px}
 .dia-col{margin-bottom:18px}
 .dia-header{font-weight:700;font-size:14px;margin-bottom:6px}
 .slot-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:6px}
-.slot-row .slot-nombre{width:70px;flex:none;font-size:12px;color:var(--text-soft)}
+.slot-row .slot-nombre{width:80px;flex:none;font-size:12px;color:var(--text-soft)}
 .slot-row .slot-contenido{flex:1;font-size:13px}
 .slot-row.vacio{opacity:.6}
 .slot-row.cocinado{background:var(--success-soft)}
@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Zacatecas2';
+const BUILD_VERSION = 'Aguascalientes';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1852,27 +1852,47 @@ async function limpiarComprados(){
 // ============================================================
 //  CALENDARIO
 // ============================================================
-const SLOTS = ['Desayuno','Comida','Cena','Snack'];
+// "Preparado" es su propio slot, separado de las comidas — para cuando lo
+// que se cocinó un día se come repartido en varias comidas y varios días
+// (ej. un caldo: se prepara hoy, pero se desayuna hoy, se cena hoy Y se
+// desayuna mañana). Cada comida se sigue agregando por su cuenta en el
+// día que corresponda (ya se podía tener varias entradas por slot); este
+// renglón nuevo es solo para anotar aparte "esto se cocinó hoy".
+const SLOTS = ['Preparado','Desayuno','Comida','Cena','Snack'];
+const SLOT_ICONOS = { Preparado:'🍳', Desayuno:'🌅', Comida:'🍽️', Cena:'🌙', Snack:'🍎' };
+// Ventana de 7 días que se puede mover hacia el pasado o el futuro —
+// empieza 3 días antes de hoy para que el pasado reciente ya se vea sin
+// tener que navegar.
+let calendarioOffsetDias = -3;
+function fechaLocalISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function moverVentanaCalendario(delta){ calendarioOffsetDias += delta; renderCalendario(); }
+function irAHoyCalendario(){ calendarioOffsetDias = -3; renderCalendario(); }
 function renderCalendario(){
   if(!usuarioActivo) return;
   const dias = [];
   const base = new Date(hoyLocalISO()+'T00:00:00');
-  for(let i=0;i<7;i++){ const d = new Date(base); d.setDate(base.getDate()+i); dias.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')); }
+  for(let i=0;i<7;i++){ const d = new Date(base); d.setDate(base.getDate()+calendarioOffsetDias+i); dias.push(fechaLocalISO(d)); }
+  const hoyISO = hoyLocalISO();
   const entradas = activos(DATA.calendario);
-  document.getElementById('calendarioLista').innerHTML = dias.map((fecha,i)=>{
-    const etiqueta = i===0?'Hoy':i===1?'Mañana':new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
+  const nav = `<div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:12px">
+      <button class="btn ghost" onclick="moverVentanaCalendario(-7)">‹ Anteriores</button>
+      <button class="btn ghost" onclick="irAHoyCalendario()">Hoy</button>
+      <button class="btn ghost" onclick="moverVentanaCalendario(7)">Siguientes ›</button>
+    </div>`;
+  document.getElementById('calendarioLista').innerHTML = nav + dias.map((fecha)=>{
+    const etiqueta = fecha===hoyISO ? 'Hoy' : new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
     return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>` +
       SLOTS.map(slot=>{
-        // Un slot (Desayuno/Comida/Cena/Snack) puede tener VARIAS entradas
-        // el mismo día — ej. Desayuno: "Bistec en su jugo" + "Agua de
-        // horchata" — así que se listan todas, y siempre queda un renglón
-        // "+ Agregar otra" al final para seguir sumando sin límite.
+        // Un slot puede tener VARIAS entradas el mismo día — ej. Desayuno:
+        // "Bistec en su jugo" + "Agua de horchata" — así que se listan
+        // todas, y siempre queda un renglón "+ Agregar otra" al final.
         const entries = entradas.filter(e=>e.Fecha===fecha && e.Slot===slot);
+        const etiquetaSlot = SLOT_ICONOS[slot]+' '+slot;
         const filas = entries.map((entry,idx)=>{
           const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
-          return `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${idx===0?slot:''}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
+          return `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${idx===0?etiquetaSlot:''}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
         }).join('');
-        const filaAgregar = `<div class="slot-row vacio" onclick="abrirAsignarSlot('${fecha}','${slot}')"><span class="slot-nombre">${entries.length?'':slot}</span><span class="slot-contenido hint">${entries.length?'+ Agregar otra':'+ Agregar'}</span></div>`;
+        const filaAgregar = `<div class="slot-row vacio" onclick="abrirAsignarSlot('${fecha}','${slot}')"><span class="slot-nombre">${entries.length?'':etiquetaSlot}</span><span class="slot-contenido hint">${entries.length?'+ Agregar otra':'+ Agregar'}</span></div>`;
         return filas + filaAgregar;
       }).join('') + `</div>`;
   }).join('');
