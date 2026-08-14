@@ -303,7 +303,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Sonora';
+const BUILD_VERSION = 'Chihuahua';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1617,8 +1617,11 @@ function mostrarRevisionOrdenIA(r, categoriasValidas){
   const html = `<h3>🤖 Ordenar con IA</h3>
     <p class="hint">🤖 ${mensajeModelo(r,'Sugerido')} — revisa antes de aplicar, nada se guarda todavía.</p>
     <h3 style="margin-top:10px">📋 Categorías sugeridas (${catEntries.length})</h3>
-    ${catEntries.length ? `<div style="max-height:220px;overflow:auto">${catEntries.map(([n,c])=>`<div class="ing-row"><span class="nombre">${escAttr(n)}</span><span class="cant">${catEmoji(c)} ${escAttr(c)}</span></div>`).join('')}</div>
-      <button class="btn" style="margin-top:8px" onclick="aplicarCategoriasSugeridasIA()">✅ Aplicar todas las categorías</button>` : '<p class="hint">Nada nuevo que categorizar.</p>'}
+    ${catEntries.length ? `<div style="max-height:260px;overflow:auto">${catEntries.map(([n,c])=>`<div class="ing-row"><span class="nombre">${escAttr(n)}</span><select data-nombre="${escAttr(n)}" onchange="catSugeridaCambio(this)" style="font-size:13px">
+        <option value="">— no aplicar —</option>
+        ${categoriasValidas.map(cv=>`<option value="${escAttr(cv)}" ${cv===c?'selected':''}>${catEmoji(cv)} ${escAttr(cv)}</option>`).join('')}
+      </select></div>`).join('')}</div>
+      <button class="btn" style="margin-top:8px" onclick="aplicarCategoriasSugeridasIA()">✅ Aplicar categorías</button>` : '<p class="hint">Nada nuevo que categorizar.</p>'}
     <h3 style="margin-top:14px">🔀 Posibles duplicados (${window._dupGruposIA.length})</h3>
     ${window._dupGruposIA.length ? window._dupGruposIA.map((g,i)=>`<div class="card"><div class="body">
         <div><b>${escAttr(g.canonico)}</b></div>
@@ -1632,10 +1635,13 @@ function fusionarDesdeIA(i){
   const g = window._dupGruposIA[i]; if(!g) return;
   fusionarIngredientes(g.canonico, g.variantes||[]);
 }
+function catSugeridaCambio(sel){
+  window._catSugeridasIA[sel.dataset.nombre] = sel.value;
+}
 async function aplicarCategoriasSugeridasIA(){
   const mapa = window._catSugeridasIA||{};
-  const nombres = Object.keys(mapa);
-  if(!nombres.length) return;
+  const nombres = Object.keys(mapa).filter(n=>mapa[n]);
+  if(!nombres.length){ showToast('No hay categorías para aplicar'); return; }
   let aplicadas = 0;
   for(const nombre of nombres){
     const categoria = mapa[nombre];
