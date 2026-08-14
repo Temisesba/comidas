@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Guanajuato';
+const BUILD_VERSION = 'Chihuahua';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1130,8 +1130,10 @@ async function guardarEditarHistorial(id){
   const h = DATA.recetas_historial.find(x=>x.ID===id); if(!h) return;
   const btn = document.getElementById('heGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
+  const fechaAnterior = h.Fecha;
+  const nuevaFecha = document.getElementById('heFecha').value || h.Fecha;
   const row = Object.assign({}, h, {
-    Fecha: document.getElementById('heFecha').value || h.Fecha,
+    Fecha: nuevaFecha,
     Estrellas: window._histEditEstrellas || '',
     Comentario: document.getElementById('heComentario').value,
     FotoURL: historialEditFotos[0]||'',
@@ -1141,6 +1143,17 @@ async function guardarEditarHistorial(id){
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   const idx = DATA.recetas_historial.findIndex(x=>x.ID===id);
   if(idx>=0) DATA.recetas_historial[idx] = row;
+  // "Cocinar ahora" crea de paso una entrada de Calendario en Preparado —
+  // si aquí se cambia la fecha del historial, esa entrada se queda pegada
+  // en la fecha vieja si no se mueve también (bug real reportado: el
+  // historial mostraba 13 y 14 de agosto pero Calendario solo el 14).
+  if(nuevaFecha !== fechaAnterior){
+    const calEntry = activos(DATA.calendario).find(e=>e.RecetaID===h.RecetaID && e.Slot==='Preparado' && e.Fecha===fechaAnterior);
+    if(calEntry){
+      calEntry.Fecha = nuevaFecha;
+      await apiPost('saveRow', { table:'CALENDARIO', row: calEntry });
+    }
+  }
   localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   showToast('Guardado');
@@ -1148,10 +1161,17 @@ async function guardarEditarHistorial(id){
 }
 function pedirEliminarHistorial(id, recetaId){
   confirmarEliminar('Este registro del historial se eliminará para siempre — no se puede deshacer.', async ()=>{
+    const h = DATA.recetas_historial.find(x=>x.ID===id);
     const r = await apiPost('deleteRow', { table:'RECETAS_HISTORIAL', id });
     if(!r.ok){ showToast('No se pudo eliminar: '+(r.error||'sin conexión')); return; }
     const idx = DATA.recetas_historial.findIndex(x=>x.ID===id);
     if(idx>=0) DATA.recetas_historial.splice(idx,1);
+    // Limpia también la entrada de Calendario que "Cocinar ahora" creó de
+    // paso para este mismo registro, si sigue ahí.
+    if(h){
+      const calEntry = activos(DATA.calendario).find(e=>e.RecetaID===h.RecetaID && e.Slot==='Preparado' && e.Fecha===h.Fecha);
+      if(calEntry){ calEntry.Papelera = true; await apiPost('saveRow', { table:'CALENDARIO', row: calEntry }); }
+    }
     localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     abrirRecetaDetalle(recetaId);
