@@ -299,7 +299,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Aguascalientes';
+const BUILD_VERSION = 'Guanajuato';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1084,9 +1084,79 @@ function renderHistorialHtml(hist){
     <div class="meta">${fmtFecha(h.Fecha)} ${h.CocinadoPor?('· '+escAttr(h.CocinadoPor)):''}</div>
     ${h.Estrellas?estrellasHtml(h.Estrellas,true):''}
     ${h.Comentario?`<p style="margin:6px 0 0">${escAttr(h.Comentario)}</p>`:''}
+    <div class="row-actions">
+      <button onclick="abrirEditarHistorial('${h.ID}')">✏️ Editar</button>
+      <button onclick="pedirEliminarHistorial('${h.ID}','${h.RecetaID}')">🗑 Eliminar</button>
+    </div>
   </div></div>`).join('');
 }
 function cerrarModalYAbrir(fn){ document.querySelectorAll('.modal-overlay').forEach(o=>o.remove()); fn(); }
+// Editar/eliminar un registro YA guardado del historial de cocinado —
+// pedido explícito: poder cambiar fecha, fotos, calificación o comentario
+// después, o borrarlo si fue un error.
+let historialEditFotos = [];
+function abrirEditarHistorial(id){
+  const h = DATA.recetas_historial.find(x=>x.ID===id); if(!h) return;
+  historialEditFotos = parseFotos(h);
+  window._histEditEstrellas = Number(h.Estrellas)||0;
+  const html = `
+    <h3>✏️ Editar registro cocinado</h3>
+    <div class="field"><label>Fecha</label><input type="date" id="heFecha" value="${escAttr(h.Fecha)}"></div>
+    <div class="field"><label>Calificación</label><div id="heEstrellas"></div></div>
+    <div class="field"><label>Comentario</label><textarea id="heComentario" rows="2">${escAttr(h.Comentario||'')}</textarea></div>
+    <div class="field"><label>Fotos</label>
+      <div id="heFotosGaleria"></div>
+      <input type="file" accept="image/*" multiple id="heFotoInput" onchange="subirVariasFotosDesdeInput(this.files,'heFotoCrop', url=>{ historialEditFotos.push(url); renderHistorialEditFotos(); })">
+      <div id="heFotoCrop"></div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="heGuardarBtn" onclick="guardarEditarHistorial('${id}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+  renderHistorialEditEstrellas();
+  renderHistorialEditFotos();
+}
+function renderHistorialEditEstrellas(){
+  document.getElementById('heEstrellas').innerHTML = `<span class="estrellas">` +
+    [1,2,3,4,5].map(n=>`<span class="${n<=window._histEditEstrellas?'on':''}" onclick="window._histEditEstrellas=${n};renderHistorialEditEstrellas()">★</span>`).join('') + `</span>`;
+}
+function renderHistorialEditFotos(){
+  const el = document.getElementById('heFotosGaleria'); if(!el) return;
+  el.innerHTML = historialEditFotos.length ? galeriaEditorHtml(historialEditFotos, 'historialEditQuitarFoto') : '<p class="hint">Sin fotos</p>';
+}
+function historialEditQuitarFoto(i){ historialEditFotos.splice(i,1); renderHistorialEditFotos(); }
+async function guardarEditarHistorial(id){
+  const h = DATA.recetas_historial.find(x=>x.ID===id); if(!h) return;
+  const btn = document.getElementById('heGuardarBtn');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  const row = Object.assign({}, h, {
+    Fecha: document.getElementById('heFecha').value || h.Fecha,
+    Estrellas: window._histEditEstrellas || '',
+    Comentario: document.getElementById('heComentario').value,
+    FotoURL: historialEditFotos[0]||'',
+    FotosJSON: JSON.stringify(historialEditFotos)
+  });
+  const r = await apiPost('saveRow', { table:'RECETAS_HISTORIAL', row });
+  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
+  const idx = DATA.recetas_historial.findIndex(x=>x.ID===id);
+  if(idx>=0) DATA.recetas_historial[idx] = row;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  showToast('Guardado');
+  abrirRecetaDetalle(h.RecetaID);
+}
+function pedirEliminarHistorial(id, recetaId){
+  confirmarEliminar('Este registro del historial se eliminará para siempre — no se puede deshacer.', async ()=>{
+    const r = await apiPost('deleteRow', { table:'RECETAS_HISTORIAL', id });
+    if(!r.ok){ showToast('No se pudo eliminar: '+(r.error||'sin conexión')); return; }
+    const idx = DATA.recetas_historial.findIndex(x=>x.ID===id);
+    if(idx>=0) DATA.recetas_historial.splice(idx,1);
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    abrirRecetaDetalle(recetaId);
+  });
+}
 
 async function toggleFavoritoReceta(id){
   const r = findReceta(id); if(!r) return;
@@ -1406,6 +1476,10 @@ async function guardarCocinado(recetaId){
   btn.disabled = false; btn.textContent = '💾 Guardar';
   if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
   DATA.recetas_historial.push(res.historial);
+  // "Cocinar ahora" desde la receta no pasaba por el Calendario — cocinar
+  // algo debería verse ahí solo, sin tener que ir a agregarlo aparte a
+  // mano. Se anota como "Preparado" en la fecha en la que se cocinó.
+  await apiPost('saveRow', { table:'CALENDARIO', row:{ ID: uid(), Fecha: body.fecha, Slot:'Preparado', RecetaID: recetaId, TextoLibre:'', Cocinado:true, Privado:false, Usuario: usuarioActivo.ID, Papelera:false } });
   await refreshData();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   if(res.noAlcanzo && res.noAlcanzo.length) showToast('Guardado — no había suficiente: '+res.noAlcanzo.map(x=>x.nombre).join(', '));
