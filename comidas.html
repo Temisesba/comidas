@@ -213,6 +213,7 @@ nav.tabbar button .ic{font-size:18px}
       <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
         <button class="btn" style="flex:1" onclick="abrirEditorInventario(null)">➕ Agregar ingrediente</button>
         <button class="btn ghost" style="flex:1" onclick="abrirBuscarDuplicados()">🔀 Buscar duplicados</button>
+        <button class="btn ghost" style="flex:1" onclick="ordenarConIA()">🤖 Ordenar con IA</button>
       </div>
     </div>
 
@@ -302,7 +303,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Sinaloa';
+const BUILD_VERSION = 'Sonora';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1579,14 +1580,73 @@ function abrirBuscarDuplicados(){
 // Renombra TODOS los lotes de "descartado" al nombre de "canonico" — así
 // se agrupan solos la próxima vez que se renderice la lista. Ojo: esto no
 // corrige el texto de ingredientes ya escrito dentro de tus recetas.
-async function fusionarIngredientes(canonico, descartado){
-  const lotes = activos(DATA.inventario).filter(f=>f.Nombre===descartado);
-  if(!lotes.length){ showToast('Ya no hay lotes con ese nombre'); return; }
+async function fusionarIngredientes(canonico, descartados){
+  const nombres = Array.isArray(descartados) ? descartados : [descartados];
+  const lotes = activos(DATA.inventario).filter(f=>nombres.includes(f.Nombre));
+  if(!lotes.length){ showToast('Ya no hay lotes con esos nombres'); return; }
   for(const f of lotes){
     f.Nombre = canonico;
     await apiPost('guardarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, row: { ID: f.ID, Nombre: canonico, Categoria: f.Categoria, Cantidad: f.Cantidad, Unidad: f.Unidad, FechaCaducidad: f.FechaCaducidad, Tienda: f.Tienda, Marca: f.Marca, Codigo: f.Codigo, Piezas: f.Piezas } });
   }
   showToast(`✓ Fusionado (${lotes.length} lote${lotes.length===1?'':'s'})`);
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  await refreshData();
+}
+// ── "🤖 Ordenar con IA" — mismo objetivo que Buscar duplicados pero con
+// IA en vez de una heurística de palabras: sugiere categoría para lo que
+// no tiene, y agrupa duplicados con nombre distinto (mejor que la
+// heurística — entiende "Verduras mixtas" = "Mix de verduras" aunque no
+// compartan ninguna palabra). Es sugerencia — nada se guarda hasta que el
+// usuario lo aprueba en la pantalla de revisión.
+async function ordenarConIA(){
+  const nombres = Array.from(new Set(activos(DATA.inventario).map(f=>f.Nombre)));
+  if(!nombres.length){ showToast('No hay ingredientes para ordenar'); return; }
+  showToast('🤖 Pensando…');
+  const categorias = categoriasOrdenadas().map(c=>c.Nombre);
+  const r = await apiPost('clasificarIngredientesConIA', { nombres, categorias });
+  if(!r.ok){ showToast('No se pudo ordenar: '+(r.error||'sin conexión')); return; }
+  mostrarRevisionOrdenIA(r, categorias);
+}
+function mostrarRevisionOrdenIA(r, categoriasValidas){
+  // Solo se ofrecen categorías que de verdad existen en Configuración —
+  // por si la IA sugiere algo fuera de la lista.
+  window._catSugeridasIA = {};
+  Object.entries(r.categorias||{}).forEach(([n,c])=>{ if(categoriasValidas.includes(c)) window._catSugeridasIA[n] = c; });
+  window._dupGruposIA = r.duplicados||[];
+  const catEntries = Object.entries(window._catSugeridasIA);
+  const html = `<h3>🤖 Ordenar con IA</h3>
+    <p class="hint">🤖 ${mensajeModelo(r,'Sugerido')} — revisa antes de aplicar, nada se guarda todavía.</p>
+    <h3 style="margin-top:10px">📋 Categorías sugeridas (${catEntries.length})</h3>
+    ${catEntries.length ? `<div style="max-height:220px;overflow:auto">${catEntries.map(([n,c])=>`<div class="ing-row"><span class="nombre">${escAttr(n)}</span><span class="cant">${catEmoji(c)} ${escAttr(c)}</span></div>`).join('')}</div>
+      <button class="btn" style="margin-top:8px" onclick="aplicarCategoriasSugeridasIA()">✅ Aplicar todas las categorías</button>` : '<p class="hint">Nada nuevo que categorizar.</p>'}
+    <h3 style="margin-top:14px">🔀 Posibles duplicados (${window._dupGruposIA.length})</h3>
+    ${window._dupGruposIA.length ? window._dupGruposIA.map((g,i)=>`<div class="card"><div class="body">
+        <div><b>${escAttr(g.canonico)}</b></div>
+        <div class="hint">= ${(g.variantes||[]).map(v=>escAttr(v)).join(', ')}</div>
+        <button class="btn secondary" style="margin-top:6px" onclick="fusionarDesdeIA(${i})">🔀 Fusionar en "${escAttr(g.canonico)}"</button>
+      </div></div>`).join('') : '<p class="hint">No se sugirió ningún duplicado.</p>'}
+    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
+}
+function fusionarDesdeIA(i){
+  const g = window._dupGruposIA[i]; if(!g) return;
+  fusionarIngredientes(g.canonico, g.variantes||[]);
+}
+async function aplicarCategoriasSugeridasIA(){
+  const mapa = window._catSugeridasIA||{};
+  const nombres = Object.keys(mapa);
+  if(!nombres.length) return;
+  let aplicadas = 0;
+  for(const nombre of nombres){
+    const categoria = mapa[nombre];
+    const lotes = activos(DATA.inventario).filter(f=>f.Nombre===nombre && !f.Categoria);
+    for(const f of lotes){
+      f.Categoria = categoria;
+      await apiPost('guardarItemInventarioGastos', { sesion: gastosSesion, pass: gastosPass, row: { ID: f.ID, Nombre: f.Nombre, Categoria: categoria, Cantidad: f.Cantidad, Unidad: f.Unidad, FechaCaducidad: f.FechaCaducidad, Tienda: f.Tienda, Marca: f.Marca, Codigo: f.Codigo, Piezas: f.Piezas } });
+      aplicadas++;
+    }
+  }
+  showToast(`✓ ${aplicadas} lote(s) categorizados`);
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   await refreshData();
 }
