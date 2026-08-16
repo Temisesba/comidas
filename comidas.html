@@ -310,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Tlaxcala';
+const BUILD_VERSION = 'Campeche';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -363,29 +363,38 @@ async function apiPost(action, params, timeoutMs){
   // para que el usuario recupere el botón en vez de quedar atorado.
   const controller = timeoutMs ? new AbortController() : null;
   const timer = timeoutMs ? setTimeout(()=>controller.abort(), timeoutMs) : null;
-  try{
-    const f = new FormData(); f.append('payload', JSON.stringify(body));
-    const r = await fetch(GAS_URL, { method:'POST', body:f, signal: controller?controller.signal:undefined });
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    let data;
-    try{ data = await r.json(); }
-    catch(e){ throw new Error('Respuesta rara del servidor (no era JSON) — puede ser un problema pasajero de Google, intenta de nuevo'); }
-    setConnBanner(false);
-    return data;
-  }catch(e){
-    const esTimeout = e.name==='AbortError';
-    const mensaje = esTimeout ? 'Se tardó demasiado y se canceló — puede ser tu conexión o que la foto es muy pesada. Intenta de nuevo.' : (e.message||'sin conexión');
-    // Mensaje real, no un "sin conexión" genérico — puede ser de verdad sin
-    // internet, o una falla pasajera de Google entregando la respuesta
-    // (pasó varias veces durante pruebas: la ejecución en el backend fue
-    // instantánea pero la entrega del resultado tardó/falló) — con el texto
-    // real se puede distinguir un caso del otro la próxima vez.
-    if(!esTimeout) setConnBanner(true, mensaje);
-    if(!esTimeout && ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
-    return { ok:false, error: mensaje };
-  }finally{
-    if(timer) clearTimeout(timer);
-  }
+  const intento = (async ()=>{
+    try{
+      const f = new FormData(); f.append('payload', JSON.stringify(body));
+      const r = await fetch(GAS_URL, { method:'POST', body:f, signal: controller?controller.signal:undefined });
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      let data;
+      try{ data = await r.json(); }
+      catch(e){ throw new Error('Respuesta rara del servidor (no era JSON) — puede ser un problema pasajero de Google, intenta de nuevo'); }
+      setConnBanner(false);
+      return data;
+    }catch(e){
+      const esTimeout = e.name==='AbortError';
+      const mensaje = esTimeout ? 'Se tardó demasiado y se canceló — puede ser tu conexión o que la foto es muy pesada. Intenta de nuevo.' : (e.message||'sin conexión');
+      // Mensaje real, no un "sin conexión" genérico — puede ser de verdad sin
+      // internet, o una falla pasajera de Google entregando la respuesta
+      // (pasó varias veces durante pruebas: la ejecución en el backend fue
+      // instantánea pero la entrega del resultado tardó/falló) — con el texto
+      // real se puede distinguir un caso del otro la próxima vez.
+      if(!esTimeout) setConnBanner(true, mensaje);
+      if(!esTimeout && ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
+      return { ok:false, error: mensaje };
+    }finally{
+      if(timer) clearTimeout(timer);
+    }
+  })();
+  if(!timeoutMs) return intento;
+  // Respaldo independiente del AbortController: si el navegador no llega a
+  // cancelar/rechazar el fetch de verdad (pasa en algunos entornos), esto
+  // garantiza que apiPost SIEMPRE responde, no se queda pensando para
+  // siempre pase lo que pase adentro del intento real.
+  const respaldo = new Promise(resolve=>setTimeout(()=>resolve({ ok:false, error:'Se tardó demasiado y se canceló. Intenta de nuevo.' }), timeoutMs+3000));
+  return Promise.race([intento, respaldo]);
 }
 function encolarReintento(action, params){
   let cola = [];
@@ -2414,22 +2423,29 @@ function actualizarBotonAnalizarComida(){
 }
 async function analizarComidaIA(){
   const btn = document.getElementById('comidaAnalizarBtn');
-  const texto = document.getElementById('comidaTexto').value.trim();
-  const foto = window._comidaFotoRecortada;
-  window._comidaFecha = document.getElementById('comidaFecha').value || hoyLocalISO();
-  window._comidaSlot = document.getElementById('comidaSlot').value || guessSlotActual();
   btn.disabled = true; btn.textContent = '🤖 Pensando…';
-  const r = await apiPost('analizarComidaConIA', {
-    base64: foto?foto.base64:'', mimeType: foto?foto.mimeType:'', texto,
-    alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||''
-  }, 45000);
-  if(!r.ok){ btn.disabled=false; btn.textContent='🤖 Analizar'; showToast('No se pudo analizar: '+(r.error||'sin conexión')); return; }
-  window._comidaTextoOriginal = texto;
-  // Se cierra el modal del formulario antes de abrir el de revisión — si no,
-  // se apilan dos overlays uno encima del otro (el de abajo queda "vivo" y
-  // puede reaparecer si se cierra el de revisión sin querer).
-  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  mostrarRevisionComidaIA(r);
+  try{
+    const texto = document.getElementById('comidaTexto').value.trim();
+    const foto = window._comidaFotoRecortada;
+    window._comidaFecha = document.getElementById('comidaFecha').value || hoyLocalISO();
+    window._comidaSlot = document.getElementById('comidaSlot').value || guessSlotActual();
+    const r = await apiPost('analizarComidaConIA', {
+      base64: foto?foto.base64:'', mimeType: foto?foto.mimeType:'', texto,
+      alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||''
+    }, 45000);
+    if(!r.ok){ showToast('No se pudo analizar: '+(r.error||'sin conexión')); return; }
+    window._comidaTextoOriginal = texto;
+    // Se cierra el modal del formulario antes de abrir el de revisión — si
+    // no, se apilan dos overlays uno encima del otro (el de abajo queda
+    // "vivo" y puede reaparecer si se cierra el de revisión sin querer).
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    mostrarRevisionComidaIA(r);
+  }catch(e){
+    console.error('analizarComidaIA', e);
+    showToast('Error inesperado al analizar: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🤖 Analizar'; }
+  }
 }
 const NUTRI_CAMPOS = [['Energia','energia','kcal'],['Grasas','grasas','g'],['GrasasSaturadas','grasasSaturadas','g'],['Carbohidratos','carbohidratos','g'],['Azucares','azucares','g'],['Fibra','fibra','g'],['Proteina','proteina','g'],['Sal','sal','g']];
 const NUTRI_ETIQUETAS = { Energia:'Energía', Grasas:'Grasas', GrasasSaturadas:'Grasas saturadas', Carbohidratos:'Carbohidratos', Azucares:'Azúcares', Fibra:'Fibra', Proteina:'Proteína', Sal:'Sal' };
@@ -2475,38 +2491,46 @@ async function guardarComidaRegistrada(){
   // instantánea pero entrega lenta) el botón avisa que sigue vivo en vez
   // de quedarse en "Guardando…" sin más, para que no se vea trabado.
   const avisoTardanza = setTimeout(()=>{ if(btn) btn.textContent = 'Guardando… (Google se está tardando, espera)'; }, 10000);
-  const valores = {};
-  NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('comidaCampo_'+campo); valores[campo] = el ? (Number(el.value)||0) : 0; });
-  let fotoUrl = '';
-  const foto = window._comidaFotoRecortada;
-  if(foto){
-    // Con timeout — si esto se queda pensando en una conexión lenta no debe
-    // trabar el registro para siempre, se guarda sin foto y se avisa.
-    const up = await apiPost('uploadImage', { imageBase64: foto.base64, mimeType: foto.mimeType, fileName:'comidas-'+Date.now()+'.jpg' }, 45000);
-    if(up.ok) fotoUrl = up.url;
-    else showToast('No se pudo subir la foto (se guarda sin foto): '+(up.error||'sin conexión'));
-  }
-  const row = {
-    ID: uid(), Usuario: usuarioActivo.ID, Fecha: window._comidaFecha||hoyLocalISO(), Hora: new Date().toISOString(),
-    Slot: window._comidaSlot||guessSlotActual(),
-    Descripcion: window._comidaTextoOriginal || r.nombreDetectado || 'Comida', FotoURL: fotoUrl,
-    Energia: valores.Energia, Grasas: valores.Grasas, GrasasSaturadas: valores.GrasasSaturadas,
-    Carbohidratos: valores.Carbohidratos, Azucares: valores.Azucares, Fibra: valores.Fibra,
-    Proteina: valores.Proteina, Sal: valores.Sal, Modelo: r.modelo||'', Papelera: false
-  };
-  const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
-  clearTimeout(avisoTardanza);
-  if(!res.ok){
+  // try/catch/finally envuelve TODO: si algo truena por una razón que no
+  // sea de red (un bug, un dato inesperado), antes se quedaba pensando
+  // para siempre sin avisar nada — ahora siempre se destraba y se ve el
+  // error real en pantalla.
+  try{
+    const valores = {};
+    NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('comidaCampo_'+campo); valores[campo] = el ? (Number(el.value)||0) : 0; });
+    let fotoUrl = '';
+    const foto = window._comidaFotoRecortada;
+    if(foto){
+      const up = await apiPost('uploadImage', { imageBase64: foto.base64, mimeType: foto.mimeType, fileName:'comidas-'+Date.now()+'.jpg' }, 45000);
+      if(up.ok) fotoUrl = up.url;
+      else showToast('No se pudo subir la foto (se guarda sin foto): '+(up.error||'sin conexión'));
+    }
+    const row = {
+      ID: uid(), Usuario: usuarioActivo.ID, Fecha: window._comidaFecha||hoyLocalISO(), Hora: new Date().toISOString(),
+      Slot: window._comidaSlot||guessSlotActual(),
+      Descripcion: window._comidaTextoOriginal || r.nombreDetectado || 'Comida', FotoURL: fotoUrl,
+      Energia: valores.Energia, Grasas: valores.Grasas, GrasasSaturadas: valores.GrasasSaturadas,
+      Carbohidratos: valores.Carbohidratos, Azucares: valores.Azucares, Fibra: valores.Fibra,
+      Proteina: valores.Proteina, Sal: valores.Sal, Modelo: r.modelo||'', Papelera: false
+    };
+    const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
+    if(!res.ok){
+      showToast('No se pudo guardar: '+(res.error||'sin conexión'));
+      return;
+    }
+    DATA.nutricion_log.push(row);
+    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    showToast('✓ Comida registrada');
+    window._comidaFotoRecortada = null; window._comidaAnalisis = null;
+    renderComidas();
+  }catch(e){
+    console.error('guardarComidaRegistrada', e);
+    showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
+  }finally{
+    clearTimeout(avisoTardanza);
     if(btn){ btn.disabled=false; btn.textContent='💾 Registrar esta comida'; }
-    showToast('No se pudo guardar: '+(res.error||'sin conexión'));
-    return;
   }
-  DATA.nutricion_log.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
-  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  showToast('✓ Comida registrada');
-  window._comidaFotoRecortada = null; window._comidaAnalisis = null;
-  renderComidas();
 }
 async function pedirSugerenciaComidaIA(){
   const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
