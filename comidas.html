@@ -310,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Aguascalientes';
+const BUILD_VERSION = 'Tlaxcala';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -2441,9 +2441,9 @@ function mostrarRevisionComidaIA(r){
     <p class="hint">🤖 ${mensajeModelo(r,'Analizado')} — revisa/edita antes de guardar.</p>
     ${r.alertaPreferencias?`<p class="hint" style="color:var(--danger)">⚠️ ${escAttr(r.alertaPreferencias)}</p>`:''}
     ${(r.componentes&&r.componentes.length>1)?`<div style="margin:8px 0">${r.componentes.map(c=>`
-      <div class="inv-item"><div class="info"><div class="nombre">${escAttr(c.nombre)}</div><div class="meta">${Math.round(c.energia||0)} kcal</div></div>
+      <div class="inv-item"><div class="info"><div class="nombre">${escAttr(c.nombre)}</div><div class="meta">${Math.round(c.energia||0)} kcal</div>
         <div class="hint" style="margin-top:2px">Grasas ${red1(c.grasas)}g (sat ${red1(c.grasasSaturadas)}g) · Carbs ${red1(c.carbohidratos)}g (az ${red1(c.azucares)}g) · Fibra ${red1(c.fibra)}g · Proteína ${red1(c.proteina)}g · Sal ${red1(c.sal)}g</div>
-      </div>`).join('')}
+      </div></div>`).join('')}
       <p class="hint" style="margin-top:4px">Total sumando todo lo de arriba — edítalo abajo si algo no cuadra:</p>
     </div>`:''}
     <div id="comidaVeredicto" class="hint" style="margin:8px 0;font-weight:600"></div>
@@ -2471,6 +2471,10 @@ async function guardarComidaRegistrada(){
   const r = window._comidaAnalisis; if(!r) return;
   const btn = document.getElementById('comidaGuardarBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  // Si Google se tarda en entregar la respuesta (ya pasó antes, ejecución
+  // instantánea pero entrega lenta) el botón avisa que sigue vivo en vez
+  // de quedarse en "Guardando…" sin más, para que no se vea trabado.
+  const avisoTardanza = setTimeout(()=>{ if(btn) btn.textContent = 'Guardando… (Google se está tardando, espera)'; }, 10000);
   const valores = {};
   NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('comidaCampo_'+campo); valores[campo] = el ? (Number(el.value)||0) : 0; });
   let fotoUrl = '';
@@ -2490,7 +2494,8 @@ async function guardarComidaRegistrada(){
     Carbohidratos: valores.Carbohidratos, Azucares: valores.Azucares, Fibra: valores.Fibra,
     Proteina: valores.Proteina, Sal: valores.Sal, Modelo: r.modelo||'', Papelera: false
   };
-  const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 20000);
+  const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
+  clearTimeout(avisoTardanza);
   if(!res.ok){
     if(btn){ btn.disabled=false; btn.textContent='💾 Registrar esta comida'; }
     showToast('No se pudo guardar: '+(res.error||'sin conexión'));
