@@ -310,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Colima';
+const BUILD_VERSION = 'Zacatecas';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -354,12 +354,18 @@ const ACCIONES_REINTENTABLES = new Set(['saveRow']);
 const COLA_PENDIENTE_KEY = 'comidas_cola_pendiente';
 let reintentandoCola = false;
 function needsSetup(){ return !GAS_URL; }
-async function apiPost(action, params){
+async function apiPost(action, params, timeoutMs){
   if(needsSetup()) return { ok:false, error:'sin vincular' };
   const body = Object.assign({ action }, params||{});
+  // timeoutMs es opcional (por defecto sin límite, igual que antes) — se usa
+  // en llamadas que pueden tardarse mucho y quedarse "pensando" para siempre
+  // sin avisar nada (ej. análisis de foto con IA en una conexión lenta),
+  // para que el usuario recupere el botón en vez de quedar atorado.
+  const controller = timeoutMs ? new AbortController() : null;
+  const timer = timeoutMs ? setTimeout(()=>controller.abort(), timeoutMs) : null;
   try{
     const f = new FormData(); f.append('payload', JSON.stringify(body));
-    const r = await fetch(GAS_URL, { method:'POST', body:f });
+    const r = await fetch(GAS_URL, { method:'POST', body:f, signal: controller?controller.signal:undefined });
     if(!r.ok) throw new Error('HTTP '+r.status);
     let data;
     try{ data = await r.json(); }
@@ -367,14 +373,18 @@ async function apiPost(action, params){
     setConnBanner(false);
     return data;
   }catch(e){
+    const esTimeout = e.name==='AbortError';
+    const mensaje = esTimeout ? 'Se tardó demasiado y se canceló — puede ser tu conexión o que la foto es muy pesada. Intenta de nuevo.' : (e.message||'sin conexión');
     // Mensaje real, no un "sin conexión" genérico — puede ser de verdad sin
     // internet, o una falla pasajera de Google entregando la respuesta
     // (pasó varias veces durante pruebas: la ejecución en el backend fue
     // instantánea pero la entrega del resultado tardó/falló) — con el texto
     // real se puede distinguir un caso del otro la próxima vez.
-    setConnBanner(true, e.message);
-    if(ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
-    return { ok:false, error: e.message||'sin conexión' };
+    if(!esTimeout) setConnBanner(true, mensaje);
+    if(!esTimeout && ACCIONES_REINTENTABLES.has(action) && !reintentandoCola) encolarReintento(action, params);
+    return { ok:false, error: mensaje };
+  }finally{
+    if(timer) clearTimeout(timer);
   }
 }
 function encolarReintento(action, params){
@@ -2346,7 +2356,10 @@ function abrirRegistrarComidaModal(){
 }
 async function elegirFotoComida(fileList){
   if(!fileList || !fileList.length) return;
-  const resized = await resizeImageFile(fileList[0], 1280, 0.85);
+  // Más chica que el resize normal de fotos (1280) — para identificar
+  // comida la IA no necesita tanta resolución, y una imagen más ligera
+  // evita que el análisis se quede tardando/atorado en conexiones lentas.
+  const resized = await resizeImageFile(fileList[0], 900, 0.8);
   mostrarRecorteManual(resized, {
     containerId: 'comidaFotoCrop',
     onDescartar: ()=>{ document.getElementById('comidaFotoCrop').innerHTML=''; },
@@ -2375,13 +2388,14 @@ async function analizarComidaIA(){
   const r = await apiPost('analizarComidaConIA', {
     base64: foto?foto.base64:'', mimeType: foto?foto.mimeType:'', texto,
     alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||''
-  });
+  }, 45000);
   if(!r.ok){ btn.disabled=false; btn.textContent='🤖 Analizar'; showToast('No se pudo analizar: '+(r.error||'sin conexión')); return; }
   window._comidaTextoOriginal = texto;
   mostrarRevisionComidaIA(r);
 }
 const NUTRI_CAMPOS = [['Energia','energia','kcal'],['Grasas','grasas','g'],['GrasasSaturadas','grasasSaturadas','g'],['Carbohidratos','carbohidratos','g'],['Azucares','azucares','g'],['Fibra','fibra','g'],['Proteina','proteina','g'],['Sal','sal','g']];
 const NUTRI_ETIQUETAS = { Energia:'Energía', Grasas:'Grasas', GrasasSaturadas:'Grasas saturadas', Carbohidratos:'Carbohidratos', Azucares:'Azúcares', Fibra:'Fibra', Proteina:'Proteína', Sal:'Sal' };
+function red1(n){ return Math.round((Number(n)||0)*10)/10; }
 function mostrarRevisionComidaIA(r){
   window._comidaAnalisis = r;
   const html = `
@@ -2389,7 +2403,9 @@ function mostrarRevisionComidaIA(r){
     <p class="hint">🤖 ${mensajeModelo(r,'Analizado')} — revisa/edita antes de guardar.</p>
     ${r.alertaPreferencias?`<p class="hint" style="color:var(--danger)">⚠️ ${escAttr(r.alertaPreferencias)}</p>`:''}
     ${(r.componentes&&r.componentes.length>1)?`<div style="margin:8px 0">${r.componentes.map(c=>`
-      <div class="inv-item"><div class="info"><div class="nombre">${escAttr(c.nombre)}</div><div class="meta">${Math.round(c.energia||0)} kcal</div></div></div>`).join('')}
+      <div class="inv-item"><div class="info"><div class="nombre">${escAttr(c.nombre)}</div><div class="meta">${Math.round(c.energia||0)} kcal</div></div>
+        <div class="hint" style="margin-top:2px">Grasas ${red1(c.grasas)}g (sat ${red1(c.grasasSaturadas)}g) · Carbs ${red1(c.carbohidratos)}g (az ${red1(c.azucares)}g) · Fibra ${red1(c.fibra)}g · Proteína ${red1(c.proteina)}g · Sal ${red1(c.sal)}g</div>
+      </div>`).join('')}
       <p class="hint" style="margin-top:4px">Total sumando todo lo de arriba — edítalo abajo si algo no cuadra:</p>
     </div>`:''}
     <div id="comidaVeredicto" class="hint" style="margin:8px 0;font-weight:600"></div>
