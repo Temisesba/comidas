@@ -195,6 +195,18 @@ nav.tabbar button .ic{font-size:18px}
       </div>
     </div>
 
+    <div id="screen-comidas" class="screen">
+      <h2>🍽️ Comidas</h2>
+      <div class="card"><div class="body" id="nutriDashboard"></div></div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn" style="flex:1" onclick="abrirRegistrarComidaModal()">📸 Registrar comida</button>
+        <button class="btn ghost" style="flex:1" onclick="pedirSugerenciaComidaIA()">💡 ¿Qué como?</button>
+        <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
+      </div>
+      <div id="nutriSugerencia"></div>
+      <div id="calendarioLista"></div>
+    </div>
+
     <div id="screen-recetas" class="screen">
       <h2>📖 Recetas</h2>
       <div class="searchbar">
@@ -224,11 +236,6 @@ nav.tabbar button .ic{font-size:18px}
         <button class="btn" style="flex:1" onclick="abrirAgregarCompra(null)">➕ Agregar item</button>
         <button class="btn ghost" style="flex:1" onclick="limpiarComprados()">🧹 Limpiar comprados</button>
       </div>
-    </div>
-
-    <div id="screen-calendario" class="screen">
-      <h2>📅 Calendario</h2>
-      <div id="calendarioLista"></div>
     </div>
 
     <div id="screen-config" class="screen">
@@ -287,10 +294,10 @@ nav.tabbar button .ic{font-size:18px}
 
   <nav class="tabbar">
     <button data-tab="inicio" onclick="switchTab('inicio')"><span class="ic">🏠</span>Inicio</button>
+    <button data-tab="comidas" onclick="switchTab('comidas')"><span class="ic">🍽️</span>Comidas</button>
     <button data-tab="recetas" onclick="switchTab('recetas')"><span class="ic">📖</span>Recetas</button>
     <button data-tab="inventario" onclick="switchTab('inventario')"><span class="ic">🥕</span>Ingredientes</button>
     <button data-tab="compras" onclick="switchTab('compras')"><span class="ic">🛒</span>Compras</button>
-    <button data-tab="calendario" onclick="switchTab('calendario')"><span class="ic">📅</span>Calendario</button>
     <button data-tab="config" onclick="switchTab('config')"><span class="ic">⚙️</span>Config</button>
   </nav>
 </div>
@@ -303,8 +310,8 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chihuahua';
-let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], config:[] };
+const BUILD_VERSION = 'Nayarit';
+let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
 // Comidas — esta es la sesión de Gastos elegida (una por dispositivo, mismo
@@ -500,7 +507,11 @@ async function cargarInventarioYListaDeGastos(){
   localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
 }
 function renderAllScreens(){
-  renderInicio(); renderRecetas(); renderInventario(); renderCompras(); renderCalendario(); renderConfig();
+  renderInicio(); renderRecetas(); renderInventario(); renderCompras(); renderComidas(); renderConfig();
+}
+function renderComidas(){
+  renderNutriDashboard();
+  renderCalendario();
 }
 function switchTab(name){
   document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
@@ -510,7 +521,7 @@ function switchTab(name){
   if(name==='recetas') renderRecetas();
   if(name==='inventario') renderInventario();
   if(name==='compras') renderCompras();
-  if(name==='calendario') renderCalendario();
+  if(name==='comidas') renderComidas();
   if(name==='config') renderConfig();
 }
 
@@ -2245,6 +2256,204 @@ guardarCocinado = async function(recetaId){
 };
 
 // ============================================================
+//  Comidas: conteo de calorías con IA
+// ============================================================
+function caloriasRestantesHoy(){
+  const meta = Number(usuarioActivo.MetaCalorias)||0;
+  const hoyISO = hoyLocalISO();
+  const consumido = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera)).reduce((s,r)=>s+(Number(r.Energia)||0),0);
+  return { meta, consumido, restante: meta - consumido };
+}
+function renderNutriDashboard(){
+  if(!usuarioActivo) return;
+  const cont = document.getElementById('nutriDashboard'); if(!cont) return;
+  const { meta, consumido, restante } = caloriasRestantesHoy();
+  const hoyISO = hoyLocalISO();
+  const registros = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera)).sort((a,b)=>(a.Hora||'').localeCompare(b.Hora||''));
+  cont.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:wrap">
+      <div><div class="hint">Meta diaria</div>
+        <input type="number" id="nutriMetaInput" value="${meta||''}" placeholder="ej. 1800" style="width:90px" onchange="guardarMetaCalorias(this.value)"> <span class="hint">kcal</span>
+      </div>
+      <div style="text-align:center"><div class="hint">Llevas hoy</div><div style="font-size:20px;font-weight:700">${Math.round(consumido)}</div></div>
+      <div style="text-align:center"><div class="hint">Te quedan</div><div style="font-size:20px;font-weight:700;color:${meta && restante<0?'var(--danger)':'inherit'}">${meta?Math.round(restante):'—'}</div></div>
+    </div>
+    ${registros.length ? `<div style="margin-top:10px">${registros.map(r=>`
+      <div class="inv-item"><div class="info"><div class="nombre">${escAttr(r.Descripcion||'Comida')}</div><div class="meta">${Math.round(r.Energia||0)} kcal</div></div>
+        <div class="acciones"><button onclick="borrarRegistroComida('${r.ID}')" title="Quitar">🗑</button></div>
+      </div>`).join('')}</div>` : `<p class="hint" style="margin-top:8px">${meta?'Nada registrado hoy todavía.':'Pon tu meta diaria de calorías para empezar.'}</p>`}
+  `;
+}
+async function guardarMetaCalorias(valor){
+  const n = Number(valor);
+  usuarioActivo.MetaCalorias = (valor==='' || isNaN(n)) ? '' : n;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  renderNutriDashboard();
+  await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
+}
+async function borrarRegistroComida(id){
+  const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
+  r.Papelera = true;
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  renderNutriDashboard();
+  await apiPost('saveRow', { table:'NUTRICION_LOG', row:r });
+}
+function abrirPreferenciasComida(){
+  const u = usuarioActivo;
+  const html = `
+    <h3>🧭 Preferencias de comida</h3>
+    <div class="field"><label>Alergias (nunca sugerir)</label><textarea id="prefAlergias" rows="2" placeholder="ej. cacahuate, mariscos">${escAttr(u.PreferenciasAlergias||'')}</textarea></div>
+    <div class="field"><label>No le gusta (puedes anotar matices, ej. "huevo solo, sí en pan")</label><textarea id="prefDisgustos" rows="2" placeholder="ej. huevo solo (sí en pan), cilantro">${escAttr(u.PreferenciasDisgustos||'')}</textarea></div>
+    <div class="field"><label>Favoritas</label><textarea id="prefFavoritos" rows="2" placeholder="ej. tacos, sushi">${escAttr(u.PreferenciasFavoritos||'')}</textarea></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" onclick="guardarPreferenciasComida()">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarPreferenciasComida(){
+  usuarioActivo.PreferenciasAlergias = document.getElementById('prefAlergias').value.trim();
+  usuarioActivo.PreferenciasDisgustos = document.getElementById('prefDisgustos').value.trim();
+  usuarioActivo.PreferenciasFavoritos = document.getElementById('prefFavoritos').value.trim();
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  showToast('Preferencias guardadas');
+  await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
+}
+
+// Registrar/consultar una comida: un solo flujo con foto y/o texto — la
+// IA solo estima, nunca guarda sola; "Registrar" es lo único que persiste
+// (así "¿me recomiendas comer esto?" y "anota lo que comí" son la misma
+// pantalla, la diferencia es nada más si al final le da Registrar o Cerrar).
+function abrirRegistrarComidaModal(){
+  window._comidaFotoRecortada = null;
+  window._comidaAnalisis = null;
+  const html = `
+    <h3>📸 Registrar / consultar una comida</h3>
+    <p class="hint">Manda una foto, escribe qué comiste, o ambas — entre más info, mejor la estimación.</p>
+    <div class="field"><label>Foto (opcional)</label>
+      <div id="comidaFotoCrop"></div>
+      <input type="file" accept="image/*" onchange="elegirFotoComida(this.files)">
+    </div>
+    <div class="field"><label>Descripción (opcional)</label>
+      <textarea id="comidaTexto" rows="2" placeholder="ej. dos tacos de bistec con salsa" oninput="actualizarBotonAnalizarComida()"></textarea>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="comidaAnalizarBtn" disabled onclick="analizarComidaIA()">🤖 Analizar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function elegirFotoComida(fileList){
+  if(!fileList || !fileList.length) return;
+  const resized = await resizeImageFile(fileList[0], 1280, 0.85);
+  mostrarRecorteManual(resized, {
+    containerId: 'comidaFotoCrop',
+    onDescartar: ()=>{ document.getElementById('comidaFotoCrop').innerHTML=''; },
+    onListo: (recortada)=>{
+      window._comidaFotoRecortada = recortada;
+      document.getElementById('comidaFotoCrop').innerHTML = `<div class="foto-editor-item"><img src="${recortada.dataUrl}"><button type="button" class="quitar" onclick="quitarFotoComida()">✕</button></div>`;
+      actualizarBotonAnalizarComida();
+    }
+  });
+}
+function quitarFotoComida(){
+  window._comidaFotoRecortada = null;
+  document.getElementById('comidaFotoCrop').innerHTML = '';
+  actualizarBotonAnalizarComida();
+}
+function actualizarBotonAnalizarComida(){
+  const btn = document.getElementById('comidaAnalizarBtn'); if(!btn) return;
+  const texto = document.getElementById('comidaTexto');
+  btn.disabled = !(window._comidaFotoRecortada || (texto && texto.value.trim()));
+}
+async function analizarComidaIA(){
+  const btn = document.getElementById('comidaAnalizarBtn');
+  const texto = document.getElementById('comidaTexto').value.trim();
+  const foto = window._comidaFotoRecortada;
+  btn.disabled = true; btn.textContent = '🤖 Pensando…';
+  const r = await apiPost('analizarComidaConIA', {
+    base64: foto?foto.base64:'', mimeType: foto?foto.mimeType:'', texto,
+    alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||''
+  });
+  if(!r.ok){ btn.disabled=false; btn.textContent='🤖 Analizar'; showToast('No se pudo analizar: '+(r.error||'sin conexión')); return; }
+  window._comidaTextoOriginal = texto;
+  mostrarRevisionComidaIA(r);
+}
+const NUTRI_CAMPOS = [['Energia','energia','kcal'],['Grasas','grasas','g'],['GrasasSaturadas','grasasSaturadas','g'],['Carbohidratos','carbohidratos','g'],['Azucares','azucares','g'],['Fibra','fibra','g'],['Proteina','proteina','g'],['Sal','sal','g']];
+const NUTRI_ETIQUETAS = { Energia:'Energía', Grasas:'Grasas', GrasasSaturadas:'Grasas saturadas', Carbohidratos:'Carbohidratos', Azucares:'Azúcares', Fibra:'Fibra', Proteina:'Proteína', Sal:'Sal' };
+function mostrarRevisionComidaIA(r){
+  window._comidaAnalisis = r;
+  const html = `
+    <h3>${escAttr(r.nombreDetectado||'Comida analizada')}</h3>
+    <p class="hint">🤖 ${mensajeModelo(r,'Analizado')} — revisa/edita antes de guardar.</p>
+    ${r.alertaPreferencias?`<p class="hint" style="color:var(--danger)">⚠️ ${escAttr(r.alertaPreferencias)}</p>`:''}
+    <div id="comidaVeredicto" class="hint" style="margin:8px 0;font-weight:600"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
+      ${NUTRI_CAMPOS.map(([campo,key,unidad])=>`<div class="field" style="margin:0"><label>${NUTRI_ETIQUETAS[campo]} (${unidad})</label><input type="number" step="0.1" id="comidaCampo_${campo}" value="${Number(r[key])||0}" ${campo==='Energia'?'oninput="actualizarVeredictoComida()"':''}></div>`).join('')}
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar (no guardar)</button>
+      <button class="btn" onclick="guardarComidaRegistrada()">💾 Registrar esta comida</button>
+    </div>`;
+  abrirModal(html);
+  actualizarVeredictoComida();
+}
+function actualizarVeredictoComida(){
+  const el = document.getElementById('comidaVeredicto'); if(!el) return;
+  const energiaInput = document.getElementById('comidaCampo_Energia');
+  const energia = Number(energiaInput?energiaInput.value:0)||0;
+  const { meta, restante } = caloriasRestantesHoy();
+  if(!meta){ el.textContent = 'Pon tu meta diaria (arriba en Comidas) para ver si esto te alcanza.'; el.style.color=''; return; }
+  const despues = restante - energia;
+  if(despues >= 0){ el.textContent = `✅ Cabe — te quedarían ${Math.round(despues)} kcal después de esto.`; el.style.color = 'var(--success)'; }
+  else { el.textContent = `⚠️ Te pasarías por ${Math.round(-despues)} kcal si comes esto.`; el.style.color = 'var(--danger)'; }
+}
+async function guardarComidaRegistrada(){
+  const r = window._comidaAnalisis; if(!r) return;
+  const valores = {};
+  NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('comidaCampo_'+campo); valores[campo] = el ? (Number(el.value)||0) : 0; });
+  let fotoUrl = '';
+  const foto = window._comidaFotoRecortada;
+  if(foto){
+    const up = await apiPost('uploadImage', { imageBase64: foto.base64, mimeType: foto.mimeType, fileName:'comidas-'+Date.now()+'.jpg' });
+    if(up.ok) fotoUrl = up.url;
+  }
+  const row = {
+    ID: uid(), Usuario: usuarioActivo.ID, Fecha: hoyLocalISO(), Hora: new Date().toISOString(),
+    Descripcion: window._comidaTextoOriginal || r.nombreDetectado || 'Comida', FotoURL: fotoUrl,
+    Energia: valores.Energia, Grasas: valores.Grasas, GrasasSaturadas: valores.GrasasSaturadas,
+    Carbohidratos: valores.Carbohidratos, Azucares: valores.Azucares, Fibra: valores.Fibra,
+    Proteina: valores.Proteina, Sal: valores.Sal, Modelo: r.modelo||'', Papelera: false
+  };
+  const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row });
+  if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
+  DATA.nutricion_log.push(row);
+  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  showToast('✓ Comida registrada');
+  window._comidaFotoRecortada = null; window._comidaAnalisis = null;
+  renderNutriDashboard();
+}
+async function pedirSugerenciaComidaIA(){
+  const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
+  cont.innerHTML = '<p class="hint">🤖 Pensando…</p>';
+  const { meta, restante } = caloriasRestantesHoy();
+  const recetas = activos(DATA.recetas).map(r=>({id:r.ID, nombre:r.Nombre, categoria:r.Categoria}));
+  const body = { alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||'', recetas };
+  if(meta) body.caloriasRestantes = restante;
+  const r = await apiPost('sugerirComidaConIA', body);
+  if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo sugerir: ${escAttr(r.error||'sin conexión')}</p>`; return; }
+  cont.innerHTML = `<div class="idea-card">
+    <div class="titulo" style="font-weight:700">${escAttr(r.nombre||'Sugerencia')}</div>
+    <div class="meta hint">~${Math.round(r.energia||0)} kcal</div>
+    ${r.nota?`<p style="margin:8px 0 4px">${escAttr(r.nota)}</p>`:''}
+    <p class="hint" style="margin-top:8px">🤖 ${mensajeModelo(r,'Sugerido')}</p>
+    ${r.origen==='receta_existente' && r.recetaId ? `<button class="btn" style="margin-top:8px" onclick="abrirRecetaDetalle('${r.recetaId}')">🍽 Ver receta</button>` : ''}
+  </div>`;
+}
+
+// ============================================================
 //  CONFIGURACIÓN
 // ============================================================
 function renderConfig(){
@@ -2400,7 +2609,7 @@ function limpiarNotas(){
   confirmarEliminar('Se van a borrar todas las notas.', ()=>{ ta.value=''; guardarNotasConfig(); });
 }
 
-const NOMBRE_TABLA_PAPELERA = { RECETAS:'receta', INVENTARIO:'ingrediente', LISTA_COMPRAS:'lista de compras', USUARIOS:'usuario', CALENDARIO:'calendario' };
+const NOMBRE_TABLA_PAPELERA = { RECETAS:'receta', INVENTARIO:'ingrediente', LISTA_COMPRAS:'lista de compras', USUARIOS:'usuario', CALENDARIO:'calendario', NUTRICION_LOG:'comida registrada' };
 function renderPapeleraConfig(){
   const items = [];
   DATA.recetas.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'RECETAS', nombre:r.Nombre, row:r}));
@@ -2409,6 +2618,7 @@ function renderPapeleraConfig(){
     const desc = r.RecetaID ? (findReceta(r.RecetaID)?findReceta(r.RecetaID).Nombre:'(receta eliminada)') : r.TextoLibre;
     items.push({tabla:'CALENDARIO', nombre: fmtFecha(r.Fecha)+' '+r.Slot+': '+desc, row:r});
   });
+  DATA.nutricion_log.filter(r=>esVerdadero(r.Papelera)).forEach(r=>items.push({tabla:'NUTRICION_LOG', nombre: fmtFecha(r.Fecha)+': '+(r.Descripcion||'comida'), row:r}));
   const cont = document.getElementById('cfgPapelera');
   if(!items.length){ cont.innerHTML = '<p class="hint">La papelera está vacía.</p>'; return; }
   cont.innerHTML = items.map(it=>`<div class="userlist-row">
