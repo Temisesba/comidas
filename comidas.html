@@ -310,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Campeche';
+const BUILD_VERSION = 'Yucatan';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -484,7 +484,7 @@ function normalizeData(d){
     usuarios: d.usuarios||[], categorias: d.categorias||[], recetas: d.recetas||[],
     recetas_historial: d.recetas_historial||[], inventario: d.inventario||[],
     precios: d.precios||[], lista_compras: d.lista_compras||[], calendario: d.calendario||[],
-    config: d.config||[]
+    nutricion_log: d.nutricion_log||[], config: d.config||[]
   };
 }
 
@@ -2464,7 +2464,7 @@ function mostrarRevisionComidaIA(r){
     </div>`:''}
     <div id="comidaVeredicto" class="hint" style="margin:8px 0;font-weight:600"></div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
-      ${NUTRI_CAMPOS.map(([campo,key,unidad])=>`<div class="field" style="margin:0"><label>${NUTRI_ETIQUETAS[campo]} (${unidad})</label><input type="number" step="0.1" id="comidaCampo_${campo}" value="${Number(r[key])||0}" ${campo==='Energia'?'oninput="actualizarVeredictoComida()"':''}></div>`).join('')}
+      ${NUTRI_CAMPOS.map(([campo,key,unidad])=>`<div class="field" style="margin:0"><label>${NUTRI_ETIQUETAS[campo]} (${unidad})</label><input type="number" step="0.1" id="comidaCampo_${campo}" value="${red1(r[key])}" ${campo==='Energia'?'oninput="actualizarVeredictoComida()"':''}></div>`).join('')}
     </div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar (no guardar)</button>
