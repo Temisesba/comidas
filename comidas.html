@@ -200,10 +200,9 @@ nav.tabbar button .ic{font-size:18px}
       <div class="card"><div class="body" id="nutriDashboard"></div></div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn" style="flex:1" onclick="abrirRegistrarComidaModal()">📸 Registrar comida</button>
-        <button class="btn ghost" style="flex:1" onclick="pedirSugerenciaComidaIA()">💡 ¿Qué como?</button>
+        <button class="btn ghost" style="flex:1" onclick="pedirSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
-      <div id="nutriSugerenciaTitulo" class="hint" style="display:none;font-weight:700;margin:4px 0">💡 Sugerencias de comida (IA)</div>
       <div id="nutriSugerencia"></div>
       <div id="calendarioLista"></div>
     </div>
@@ -311,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Oaxaca';
+const BUILD_VERSION = 'Guadalajara';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -2588,8 +2587,6 @@ async function guardarComidaRegistrada(){
 }
 async function pedirSugerenciaComidaIA(){
   const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
-  const titulo = document.getElementById('nutriSugerenciaTitulo');
-  if(titulo) titulo.style.display = '';
   cont.innerHTML = '<p class="hint">🤖 Pensando…</p>';
   const { meta, restante } = caloriasRestantesHoy();
   const recetas = activos(DATA.recetas).map(r=>({id:r.ID, nombre:r.Nombre, categoria:r.Categoria}));
