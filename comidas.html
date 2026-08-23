@@ -203,6 +203,7 @@ nav.tabbar button .ic{font-size:18px}
         <button class="btn ghost" style="flex:1" onclick="pedirSugerenciaComidaIA()">💡 ¿Qué como?</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
+      <div id="nutriSugerenciaTitulo" class="hint" style="display:none;font-weight:700;margin:4px 0">💡 Sugerencias de comida (IA)</div>
       <div id="nutriSugerencia"></div>
       <div id="calendarioLista"></div>
     </div>
@@ -328,6 +329,7 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
 function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function hoyLocalISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function fmtFecha(iso){ if(!iso) return ''; const [y,m,d] = String(iso).slice(0,10).split('-'); return d && m && y ? d+'/'+m+'/'+y : iso; }
+function fmtHora(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return ''; return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtMoneda(v){ if(v===null||v===undefined||v==='') return ''; return '$'+Number(v).toFixed(2); }
 function normalizarNombre(t){
   if(!t) return '';
@@ -546,6 +548,17 @@ async function refreshData(){
   if(r && r.ok){
     DATA = normalizeData(r.data);
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
+    // usuarioActivo apuntaba al objeto de ANTES de este refresh — DATA.usuarios
+    // se acaba de reemplazar por completo con objetos nuevos, así que si no se
+    // re-apunta aquí, usuarioActivo queda huérfano: cualquier preferencia o
+    // meta diaria que se edite después de esto se guarda en un objeto que ya
+    // no es parte de DATA, así que guardarCacheLocal() (que serializa DATA)
+    // nunca la incluye — se ve como que el cambio "no se guardó" al volver a
+    // entrar, aunque sí haya llegado al Sheet.
+    if(usuarioActivo){
+      const actualizado = DATA.usuarios.find(u=>u.ID===usuarioActivo.ID);
+      if(actualizado) usuarioActivo = actualizado;
+    }
     guardarCacheLocal();
     purgarPapeleraAntigua();
   }
@@ -2245,7 +2258,7 @@ function renderCalendario(){
           primero = false; return fila;
         }).join('');
         const filasRegistros = regs.map((r)=>{
-          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal</span></div>`;
+          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
           primero = false; return fila;
         }).join('');
         const hayAlgo = entries.length + regs.length > 0;
@@ -2257,7 +2270,7 @@ function renderCalendario(){
 function abrirAccionesComidaRegistrada(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
   const html = `
-    <h3>${SLOT_ICONOS[r.Slot]||'🔥'} ${escAttr(r.Slot||'')} — ${fmtFecha(r.Fecha)}</h3>
+    <h3>${SLOT_ICONOS[r.Slot]||'🔥'} ${escAttr(r.Slot||'')} — ${fmtFecha(r.Fecha)}${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</h3>
     ${r.FotoURL?galeriaFotosHtml([r.FotoURL]):''}
     <p><b>${escAttr(r.Descripcion||'Comida')}</b></p>
     <p class="hint">${Math.round(r.Energia||0)} kcal · Grasas ${red1(r.Grasas)}g (sat ${red1(r.GrasasSaturadas)}g) · Carbs ${red1(r.Carbohidratos)}g (az ${red1(r.Azucares)}g) · Fibra ${red1(r.Fibra)}g · Proteína ${red1(r.Proteina)}g · Sal ${red1(r.Sal)}g</p>
@@ -2575,6 +2588,8 @@ async function guardarComidaRegistrada(){
 }
 async function pedirSugerenciaComidaIA(){
   const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
+  const titulo = document.getElementById('nutriSugerenciaTitulo');
+  if(titulo) titulo.style.display = '';
   cont.innerHTML = '<p class="hint">🤖 Pensando…</p>';
   const { meta, restante } = caloriasRestantesHoy();
   const recetas = activos(DATA.recetas).map(r=>({id:r.ID, nombre:r.Nombre, categoria:r.Categoria}));
