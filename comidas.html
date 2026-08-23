@@ -310,7 +310,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Guadalajara';
+const BUILD_VERSION = 'Monterrey';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -491,14 +491,44 @@ function normalizeData(d){
 // La copia local es solo para ver algo mientras no hay internet — el dato
 // real ya vive en el Sheet (cada guardado hace su propio apiPost('saveRow')
 // ANTES de llegar aquí), así que si no cupo no se debe reportar como que el
-// guardado falló. Ojo: comidas.html, finanzas, notas, itinerario, idiomas y
-// organizador viven todos bajo el mismo origen de GitHub Pages
-// (temisesba.github.io/<repo>/) y por lo tanto COMPARTEN la misma cuota de
-// localStorage del navegador (~5-10MB total, no por app) — aunque el cache
-// de Comidas sea nuevo, las otras apps ya pueden haber llenado casi todo el
-// cupo. Por eso aquí se guarda solo lo reciente en vez de el historial
-// completo para siempre: así la parte de Comidas se mantiene chica y no es
-// la que hace que se llene el cupo compartido.
+// guardado falló.
+// Se guarda en IndexedDB y no en localStorage: comidas.html, finanzas,
+// notas, itinerario, idiomas y organizador viven todos bajo el mismo origen
+// de GitHub Pages (temisesba.github.io/<repo>/) y por lo tanto COMPARTEN la
+// misma cuota de localStorage del navegador (~5-10MB total, no por app) —
+// IndexedDB tiene una cuota mucho más grande (cientos de MB) y separada por
+// nombre de base de datos, así que el cache grande de Comidas ya no compite
+// por ese cupo compartido con las otras apps.
+const IDB_NOMBRE = 'comidas_db', IDB_STORE = 'cache', IDB_KEY_DATA = 'comidas_data_cache';
+function idbAbrir(){
+  return new Promise((resolve, reject)=>{
+    const req = indexedDB.open(IDB_NOMBRE, 1);
+    req.onupgradeneeded = ()=>{ req.result.createObjectStore(IDB_STORE); };
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function idbGet(clave){
+  const db = await idbAbrir();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(IDB_STORE, 'readonly');
+    const req = tx.objectStore(IDB_STORE).get(clave);
+    req.onsuccess = ()=> resolve(req.result);
+    req.onerror = ()=> reject(req.error);
+  });
+}
+async function idbSet(clave, valor){
+  const db = await idbAbrir();
+  return new Promise((resolve, reject)=>{
+    const tx = db.transaction(IDB_STORE, 'readwrite');
+    tx.objectStore(IDB_STORE).put(valor, clave);
+    tx.oncomplete = ()=> resolve();
+    tx.onerror = ()=> reject(tx.error);
+  });
+}
+// Aun con la cuota mucho más grande de IndexedDB, se sigue guardando solo lo
+// reciente en vez del historial completo para siempre — no cuesta nada y
+// mantiene la copia local liviana.
 const CACHE_DIAS_HISTORIAL = 120;
 function fechaDentroDeRango(fechaStr, dias){
   if(!fechaStr) return true;
@@ -515,17 +545,16 @@ function datosParaCacheLocal(){
     precios: DATA.precios.slice(-500)
   });
 }
-function guardarCacheLocal(){
-  try{ localStorage.setItem('comidas_data_cache', JSON.stringify(datosParaCacheLocal())); }
+async function guardarCacheLocal(){
+  try{ await idbSet(IDB_KEY_DATA, datosParaCacheLocal()); }
   catch(e){
-    console.warn('No se pudo actualizar la copia local (cuota de localStorage llena):', e);
-    // Recorte de emergencia: si ni con el recorte normal cupo (el cupo
-    // compartido con las otras apps ya estaba casi lleno), se guarda solo lo
-    // esencial para poder abrir la app sin internet — el historial se
-    // vuelve a traer solo del Sheet en cuanto haya conexión.
+    console.warn('No se pudo actualizar la copia local (IndexedDB):', e);
+    // Recorte de emergencia: si ni con el recorte normal cupo, se guarda
+    // solo lo esencial para poder abrir la app sin internet — el historial
+    // se vuelve a traer solo del Sheet en cuanto haya conexión.
     try{
       const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[] });
-      localStorage.setItem('comidas_data_cache', JSON.stringify(minimo));
+      await idbSet(IDB_KEY_DATA, minimo);
     }catch(e2){ console.warn('Tampoco cupo la copia mínima local:', e2); }
   }
 }
@@ -535,9 +564,35 @@ function afterConnected(){
   renderUserScreen();
 }
 
-function boot(){
-  const cached = localStorage.getItem('comidas_data_cache');
-  if(cached){ try{ DATA = normalizeData(JSON.parse(cached)); }catch(e){} }
+// Antes había que acordarse de tocar "Forzar actualización" en Configuración
+// después de cada despliegue nuevo, porque el service worker se queda con el
+// JS viejo en cache. Ahora se compara BUILD_VERSION contra lo último visto
+// en este aparato: si cambió, se limpia cache/SW y se recarga UNA vez sola
+// (el localStorage ya queda con la versión nueva ANTES de recargar, así que
+// al volver a cargar ya no hay mismatch y no se vuelve a disparar).
+function autoActualizarSiVersionVieja(){
+  const anterior = localStorage.getItem('comidas_build_version');
+  localStorage.setItem('comidas_build_version', BUILD_VERSION);
+  if(anterior && anterior !== BUILD_VERSION){ forceReloadApp(); return true; }
+  return false;
+}
+async function boot(){
+  if(autoActualizarSiVersionVieja()) return;
+  let cached = null;
+  try{ cached = await idbGet(IDB_KEY_DATA); }catch(e){ console.warn('No se pudo leer la copia local de IndexedDB:', e); }
+  if(cached){ DATA = normalizeData(cached); }
+  else{
+    // Migración de una sola vez desde versiones viejas que guardaban esto en
+    // localStorage (antes de moverlo a IndexedDB) — así no se pierde la
+    // copia offline que ya existía, y de paso se libera ese espacio de
+    // vuelta al cupo compartido con las otras apps.
+    const viejo = localStorage.getItem('comidas_data_cache');
+    if(viejo){
+      try{ DATA = normalizeData(JSON.parse(viejo)); }catch(e){}
+      localStorage.removeItem('comidas_data_cache');
+      guardarCacheLocal();
+    }
+  }
   if(needsSetup()){ return; }
   document.getElementById('setupScreen').classList.add('hidden');
   renderUserScreen();
