@@ -435,7 +435,7 @@ function finishSetup(){
   localStorage.setItem('comidas_gas_url', GAS_URL);
   err.textContent = 'Conectando…';
   apiPost('init', {}).then(r=>{
-    if(r && r.ok){ DATA = normalizeData(r.data); SHEET_URL = r.sheetUrl||''; localStorage.setItem('comidas_data_cache', JSON.stringify(DATA)); afterConnected(); }
+    if(r && r.ok){ DATA = normalizeData(r.data); SHEET_URL = r.sheetUrl||''; guardarCacheLocal(); afterConnected(); }
     else { err.textContent = 'No se pudo conectar: '+((r&&r.error)||'revisa el enlace'); }
   });
 }
@@ -487,6 +487,47 @@ function normalizeData(d){
     nutricion_log: d.nutricion_log||[], config: d.config||[]
   };
 }
+// La copia local es solo para ver algo mientras no hay internet — el dato
+// real ya vive en el Sheet (cada guardado hace su propio apiPost('saveRow')
+// ANTES de llegar aquí), así que si no cupo no se debe reportar como que el
+// guardado falló. Ojo: comidas.html, finanzas, notas, itinerario, idiomas y
+// organizador viven todos bajo el mismo origen de GitHub Pages
+// (temisesba.github.io/<repo>/) y por lo tanto COMPARTEN la misma cuota de
+// localStorage del navegador (~5-10MB total, no por app) — aunque el cache
+// de Comidas sea nuevo, las otras apps ya pueden haber llenado casi todo el
+// cupo. Por eso aquí se guarda solo lo reciente en vez de el historial
+// completo para siempre: así la parte de Comidas se mantiene chica y no es
+// la que hace que se llene el cupo compartido.
+const CACHE_DIAS_HISTORIAL = 120;
+function fechaDentroDeRango(fechaStr, dias){
+  if(!fechaStr) return true;
+  const f = new Date(String(fechaStr).slice(0,10));
+  if(isNaN(f)) return true;
+  const limite = new Date(); limite.setDate(limite.getDate()-dias);
+  return f >= limite;
+}
+function datosParaCacheLocal(){
+  return Object.assign({}, DATA, {
+    nutricion_log: DATA.nutricion_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
+    calendario: DATA.calendario.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
+    recetas_historial: DATA.recetas_historial.slice(-300),
+    precios: DATA.precios.slice(-500)
+  });
+}
+function guardarCacheLocal(){
+  try{ localStorage.setItem('comidas_data_cache', JSON.stringify(datosParaCacheLocal())); }
+  catch(e){
+    console.warn('No se pudo actualizar la copia local (cuota de localStorage llena):', e);
+    // Recorte de emergencia: si ni con el recorte normal cupo (el cupo
+    // compartido con las otras apps ya estaba casi lleno), se guarda solo lo
+    // esencial para poder abrir la app sin internet — el historial se
+    // vuelve a traer solo del Sheet en cuanto haya conexión.
+    try{
+      const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[] });
+      localStorage.setItem('comidas_data_cache', JSON.stringify(minimo));
+    }catch(e2){ console.warn('Tampoco cupo la copia mínima local:', e2); }
+  }
+}
 
 function afterConnected(){
   document.getElementById('setupScreen').classList.add('hidden');
@@ -505,7 +546,7 @@ async function refreshData(){
   if(r && r.ok){
     DATA = normalizeData(r.data);
     if(r.sheetUrl) SHEET_URL = r.sheetUrl;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     purgarPapeleraAntigua();
   }
   await cargarInventarioYListaDeGastos();
@@ -523,7 +564,7 @@ async function cargarInventarioYListaDeGastos(){
   const r = await apiPost('getDatosGastosCompartidos', { sesion: gastosSesion, pass: gastosPass });
   if(r && r.ok){ DATA.inventario = r.items; DATA.lista_compras = r.listaItems; }
   else if(r && r.error==='PASSWORD') showToast('La contraseña de la sesión de Gastos ya no es válida — vincúlala de nuevo en Configuración');
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
 }
 function renderAllScreens(){
   renderInicio(); renderRecetas(); renderInventario(); renderCompras(); renderComidas(); renderConfig();
@@ -800,7 +841,7 @@ async function crearPrimerUsuario(){
   const r = await apiPost('saveRow', { table:'USUARIOS', row });
   if(!r.ok){ err.textContent = 'No se pudo crear: '+(r.error||'sin conexión'); return; }
   DATA.usuarios.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   activarUsuario(row);
 }
 function mostrarFormNuevoUsuario(){
@@ -826,7 +867,7 @@ async function guardarNuevoUsuario(){
   const r = await apiPost('saveRow', { table:'USUARIOS', row });
   if(!r.ok){ err.textContent = 'No se pudo crear: '+(r.error||'sin conexión'); return; }
   DATA.usuarios.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   activarUsuario(row);
 }
 function pedirActivarUsuario(id){
@@ -1021,7 +1062,7 @@ async function guardarIdeaComoReceta(){
   const r = await apiPost('saveRow', { table:'RECETAS', row });
   if(!r.ok){ showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   DATA.recetas.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   showToast('✓ Receta guardada');
   abrirRecetaDetalle(row.ID);
 }
@@ -1197,7 +1238,7 @@ async function guardarEditarHistorial(id){
       await apiPost('saveRow', { table:'CALENDARIO', row: calEntry });
     }
   }
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   showToast('Guardado');
   abrirRecetaDetalle(h.RecetaID);
@@ -1215,7 +1256,7 @@ function pedirEliminarHistorial(id, recetaId){
       const calEntry = activos(DATA.calendario).find(e=>e.RecetaID===h.RecetaID && e.Slot==='Preparado' && e.Fecha===h.Fecha);
       if(calEntry){ calEntry.Papelera = true; await apiPost('saveRow', { table:'CALENDARIO', row: calEntry }); }
     }
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     abrirRecetaDetalle(recetaId);
   });
@@ -1224,7 +1265,7 @@ function pedirEliminarHistorial(id, recetaId){
 async function toggleFavoritoReceta(id){
   const r = findReceta(id); if(!r) return;
   r.Favorito = !esVerdadero(r.Favorito);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderRecetas();
   await apiPost('saveRow', { table:'RECETAS', row:r });
@@ -1233,7 +1274,7 @@ function pedirEliminarReceta(id){
   confirmarEliminar('Esta receta se moverá a la papelera.', async ()=>{
     const r = findReceta(id); if(!r) return;
     r.Papelera = true;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     renderRecetas(); renderInicio();
     await apiPost('saveRow', { table:'RECETAS', row:r });
@@ -1481,7 +1522,7 @@ async function guardarReceta(id){
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   const idx = DATA.recetas.findIndex(x=>x.ID===row.ID);
   if(idx>=0) DATA.recetas[idx] = row; else DATA.recetas.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderRecetas(); renderInicio();
   showToast('Guardado');
@@ -2019,7 +2060,7 @@ async function toggleComprado(id, nuevoValor){
   renderCompras();
   const r = await apiPost('actualizarCompradoListaGastos', { sesion: gastosSesion, pass: gastosPass, id, comprado: nuevoValor });
   if(!r.ok){ item.Comprado = anterior; renderCompras(); showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
 }
 // UI optimista: se desmarca de inmediato en pantalla (no espera al
 // backend, y mucho menos a un refreshData() completo) — antes se veía
@@ -2250,7 +2291,7 @@ async function guardarAsignacion(fecha, slot){
   const r = await apiPost('saveRow', { table:'CALENDARIO', row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   DATA.calendario.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderCalendario();
 }
@@ -2272,7 +2313,7 @@ function abrirCocinarDesdeCalendario(entryId){ window._calendarioEntryPendiente 
 async function toggleCocinadoLibre(entryId){
   const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
   entry.Cocinado = !esVerdadero(entry.Cocinado);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderCalendario();
   await apiPost('saveRow', { table:'CALENDARIO', row:entry });
@@ -2280,7 +2321,7 @@ async function toggleCocinadoLibre(entryId){
 async function quitarAsignacion(entryId){
   const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
   entry.Papelera = true;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderCalendario();
   await apiPost('saveRow', { table:'CALENDARIO', row:entry });
@@ -2294,7 +2335,7 @@ guardarCocinado = async function(recetaId){
   if(entryId){
     window._calendarioEntryPendiente = null;
     const entry = DATA.calendario.find(e=>e.ID===entryId);
-    if(entry){ entry.Cocinado = true; localStorage.setItem('comidas_data_cache', JSON.stringify(DATA)); await apiPost('saveRow', { table:'CALENDARIO', row:entry }); renderCalendario(); }
+    if(entry){ entry.Cocinado = true; guardarCacheLocal(); await apiPost('saveRow', { table:'CALENDARIO', row:entry }); renderCalendario(); }
   }
 };
 
@@ -2325,14 +2366,14 @@ function renderNutriDashboard(){
 async function guardarMetaCalorias(valor){
   const n = Number(valor);
   usuarioActivo.MetaCalorias = (valor==='' || isNaN(n)) ? '' : n;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderNutriDashboard();
   await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
 }
 async function borrarRegistroComida(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
   r.Papelera = true;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderComidas();
   await apiPost('saveRow', { table:'NUTRICION_LOG', row:r });
 }
@@ -2353,7 +2394,7 @@ async function guardarPreferenciasComida(){
   usuarioActivo.PreferenciasAlergias = document.getElementById('prefAlergias').value.trim();
   usuarioActivo.PreferenciasDisgustos = document.getElementById('prefDisgustos').value.trim();
   usuarioActivo.PreferenciasFavoritos = document.getElementById('prefFavoritos').value.trim();
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   showToast('Preferencias guardadas');
   await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
@@ -2519,7 +2560,7 @@ async function guardarComidaRegistrada(){
       return;
     }
     DATA.nutricion_log.push(row);
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     showToast('✓ Comida registrada');
     window._comidaFotoRecortada = null; window._comidaAnalisis = null;
@@ -2601,7 +2642,7 @@ async function guardarNuevoUsuarioConfig(){
   const r = await apiPost('saveRow', { table:'USUARIOS', row });
   if(!r.ok){ showToast('No se pudo crear: '+(r.error||'sin conexión')); return; }
   DATA.usuarios.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   renderConfig();
   showToast('Usuario creado');
@@ -2622,7 +2663,7 @@ async function guardarUsuarioConfig(id){
   const u = DATA.usuarios.find(x=>x.ID===id); if(!u) return;
   u.Nombre = document.getElementById('cfgEdNombre').value.trim() || u.Nombre;
   u.Password = document.getElementById('cfgEdPass').value;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
   if(usuarioActivo.ID===id){ usuarioActivo = u; document.getElementById('userBtnHeader').textContent = '👤 '+u.Nombre; }
   renderConfig();
@@ -2634,7 +2675,7 @@ function eliminarUsuarioConfig(id){
   confirmarEliminar('Este usuario se moverá a la papelera (sus datos no se borran).', async ()=>{
     const u = DATA.usuarios.find(x=>x.ID===id); if(!u) return;
     u.Papelera = true;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderConfig();
     await apiPost('saveRow', { table:'USUARIOS', row:u });
   });
@@ -2643,14 +2684,14 @@ function eliminarUsuarioConfig(id){
 async function agregarCategoria(){
   const row = { ID: uid(), Nombre:'Nueva categoría', Emoji:'🍽️', Orden: categoriasOrdenadas().length, Papelera:false };
   DATA.categorias.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderConfig();
   await apiPost('saveRow', { table:'CATEGORIAS', row });
 }
 async function editarCategoriaCampo(id, campo, valor){
   const c = DATA.categorias.find(x=>x.ID===id); if(!c) return;
   c[campo] = valor;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   await apiPost('saveRow', { table:'CATEGORIAS', row:c });
   renderRecetas(); renderInventario(); renderCompras();
 }
@@ -2661,7 +2702,7 @@ async function moverCategoria(id, delta){
   if(j<0 || j>=ordenadas.length) return;
   const a = ordenadas[i], b = ordenadas[j];
   const tmp = a.Orden; a.Orden = b.Orden; b.Orden = tmp;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderConfig();
   await apiPost('saveRow', { table:'CATEGORIAS', row:a });
   await apiPost('saveRow', { table:'CATEGORIAS', row:b });
@@ -2670,7 +2711,7 @@ function eliminarCategoria(id){
   confirmarEliminar('Esta categoría se moverá a la papelera (los items que la usan no se borran).', async ()=>{
     const c = DATA.categorias.find(x=>x.ID===id); if(!c) return;
     c.Papelera = true;
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderConfig();
     await apiPost('saveRow', { table:'CATEGORIAS', row:c });
   });
@@ -2689,7 +2730,7 @@ async function guardarNotasConfig(){
   const row = { ID:'config', Notas: val };
   const idx = DATA.config.findIndex(c=>c.ID==='config');
   if(idx>=0) DATA.config[idx] = row; else DATA.config.push(row);
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   const estado = document.getElementById('cfgNotasEstado');
   if(estado) estado.textContent = 'Guardando…';
   const r = await apiPost('saveRow', { table:'CONFIG', row });
@@ -2728,7 +2769,7 @@ async function restaurarPapelera(tabla, id){
   const arr = DATA[tabla.toLowerCase()];
   const row = arr.find(x=>x.ID===id); if(!row) return;
   row.Papelera = false;
-  localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+  guardarCacheLocal();
   renderConfig(); renderAllScreens();
   await apiPost('saveRow', { table: tabla, row });
   showToast('Restaurado');
@@ -2738,7 +2779,7 @@ function borrarParaSiempre(tabla, id){
     const arr = DATA[tabla.toLowerCase()];
     const idx = arr.findIndex(x=>x.ID===id);
     if(idx>=0) arr.splice(idx,1);
-    localStorage.setItem('comidas_data_cache', JSON.stringify(DATA));
+    guardarCacheLocal();
     renderConfig();
     await apiPost('deleteRow', { table: tabla, id });
     showToast('Borrado para siempre');
