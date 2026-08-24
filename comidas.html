@@ -188,6 +188,8 @@ nav.tabbar button .ic{font-size:18px}
   <main>
     <div id="screen-inicio" class="screen active">
       <h2>🏠 Inicio</h2>
+      <div class="card"><div class="body" id="inicioCalorias"></div></div>
+      <div id="inicioComidasHoy"></div>
       <div id="inicioCaducar"></div>
       <div id="inicioQueCocino"></div>
       <div style="margin-top:18px">
@@ -311,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Monterrey';
+const BUILD_VERSION = 'Cozumel';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1077,6 +1079,7 @@ function purgarPapeleraAntigua(){
 // ============================================================
 function renderInicio(){
   if(!usuarioActivo) return;
+  renderInicioHoy();
   const cad = document.getElementById('inicioCaducar');
   if(!gastosSesion){
     cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div><p class="hint">Vincula tu sesión de Gastos en ⚙️ Configuración para ver esto.</p>`;
@@ -1098,6 +1101,39 @@ function renderInicio(){
       <div class="meta">${m.pct}% de los ingredientes ${m.pct===100?'— ¡ya la puedes hacer!':''} ${m.faltan.length?('· falta: '+m.faltan.map(i=>i.nombre).join(', ')):''}</div>
     </div></div>`
   ).join('') : `<p class="hint">Agrega recetas e ingredientes para ver sugerencias aquí.</p>`);
+}
+// Resumen de hoy en Inicio: calorías (meta/llevas/restan) + qué ya se
+// registró o se planeó por cada momento del día, y qué sigue pendiente —
+// mismos datos que la pestaña Comidas, condensados aquí para no tener que
+// entrar a revisar. Tocar cualquier renglón manda a la pestaña Comidas.
+function renderInicioHoy(){
+  const cal = document.getElementById('inicioCalorias');
+  if(cal){
+    const { meta, consumido, restante } = caloriasRestantesHoy();
+    cal.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <div><div class="hint">Meta diaria</div><div style="font-size:18px;font-weight:700">${meta||'—'}</div></div>
+      <div style="text-align:center"><div class="hint">Llevas hoy</div><div style="font-size:18px;font-weight:700">${Math.round(consumido)}</div></div>
+      <div style="text-align:center"><div class="hint">Te quedan</div><div style="font-size:18px;font-weight:700;color:${meta&&restante<0?'var(--danger)':'inherit'}">${meta?Math.round(restante):'—'}</div></div>
+    </div>`;
+  }
+  const cont = document.getElementById('inicioComidasHoy'); if(!cont) return;
+  const hoyISO = hoyLocalISO();
+  const registros = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
+  const calEntradas = activos(DATA.calendario).filter(e=>e.Fecha===hoyISO);
+  const slotsMostrar = SLOTS.filter(s=>s!=='Preparado');
+  cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div>` + slotsMostrar.map(slot=>{
+    const items = [];
+    registros.filter(r=>r.Slot===slot).forEach(r=>items.push(`🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal`));
+    calEntradas.filter(e=>e.Slot===slot).forEach(e=>{
+      const nombre = e.RecetaID ? (findReceta(e.RecetaID)?findReceta(e.RecetaID).Nombre:'(receta eliminada)') : e.TextoLibre;
+      items.push(`${esVerdadero(e.Cocinado)?'✅ ':'📅 '}${escAttr(nombre)}`);
+    });
+    return `<div class="inv-item" onclick="switchTab('comidas')" style="cursor:pointer">
+      <div class="info"><div class="nombre">${SLOT_ICONOS[slot]} ${slot}</div>
+        <div class="meta${items.length?'':' hint'}">${items.length?items.join(' · '):'Nada todavía — pendiente'}</div>
+      </div>
+    </div>`;
+  }).join('');
 }
 async function pedirIdeaIA(){
   if(!gastosSesion){ showToast('Vincula tu sesión de Gastos en Configuración primero'); return; }
@@ -2328,12 +2364,78 @@ function abrirAccionesComidaRegistrada(id){
     <h3>${SLOT_ICONOS[r.Slot]||'🔥'} ${escAttr(r.Slot||'')} — ${fmtFecha(r.Fecha)}${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</h3>
     ${r.FotoURL?galeriaFotosHtml([r.FotoURL]):''}
     <p><b>${escAttr(r.Descripcion||'Comida')}</b></p>
+    ${Number(r.Estrellas)?`<p>${estrellasHtml(Number(r.Estrellas))}</p>`:''}
+    ${r.Notas?`<p class="hint">📝 ${escAttr(r.Notas)}</p>`:''}
     <p class="hint">${Math.round(r.Energia||0)} kcal · Grasas ${red1(r.Grasas)}g (sat ${red1(r.GrasasSaturadas)}g) · Carbs ${red1(r.Carbohidratos)}g (az ${red1(r.Azucares)}g) · Fibra ${red1(r.Fibra)}g · Proteína ${red1(r.Proteina)}g · Sal ${red1(r.Sal)}g</p>
     <div class="actions" style="justify-content:flex-start">
+      <button class="btn secondary" onclick="cerrarModalYAbrir(()=>abrirEditarComidaRegistrada('${r.ID}'))">✏️ Editar</button>
       <button class="btn danger" onclick="cerrarModalYAbrir(()=>borrarRegistroComida('${r.ID}'))">🗑 Quitar</button>
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
     </div>`;
   abrirModal(html);
+}
+function abrirEditarComidaRegistrada(id){
+  const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
+  window._comidaEditFoto = r.FotoURL || '';
+  window._comidaEditEstrellas = Number(r.Estrellas)||0;
+  const html = `
+    <h3>✏️ Editar comida</h3>
+    <div class="field"><label>Descripción</label><input type="text" id="ceDescripcion" value="${escAttr(r.Descripcion||'')}"></div>
+    <div style="display:flex;gap:8px">
+      <div class="field" style="flex:1"><label>Fecha</label><input type="date" id="ceFecha" value="${escAttr(r.Fecha)}"></div>
+      <div class="field" style="flex:1"><label>Momento</label><select id="ceSlot">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===r.Slot?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select></div>
+    </div>
+    <div class="field"><label>Calificación</label><div id="ceEstrellas"></div></div>
+    <div class="field"><label>Notas</label><textarea id="ceNotas" rows="2" placeholder="cómo te supo, cómo te sentiste…">${escAttr(r.Notas||'')}</textarea></div>
+    <div class="field"><label>Foto</label>
+      <div id="ceFotoGaleria"></div>
+      <input type="file" accept="image/*" id="ceFotoInput" onchange="subirFotoDesdeInput(this.files,'ceFotoCrop', url=>{ window._comidaEditFoto=url; renderComidaEditFoto(); })">
+      <div id="ceFotoCrop"></div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="ceGuardarBtn" onclick="guardarEditarComidaRegistrada('${id}')">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+  renderComidaEditEstrellas();
+  renderComidaEditFoto();
+}
+function renderComidaEditEstrellas(){
+  const el = document.getElementById('ceEstrellas'); if(!el) return;
+  el.innerHTML = `<span class="estrellas">` + [1,2,3,4,5].map(n=>`<span class="${n<=window._comidaEditEstrellas?'on':''}" onclick="window._comidaEditEstrellas=${n};renderComidaEditEstrellas()">★</span>`).join('') + `</span>`;
+}
+function renderComidaEditFoto(){
+  const el = document.getElementById('ceFotoGaleria'); if(!el) return;
+  el.innerHTML = window._comidaEditFoto ? galeriaEditorHtml([window._comidaEditFoto], 'comidaEditQuitarFoto') : '<p class="hint">Sin foto</p>';
+}
+function comidaEditQuitarFoto(){ window._comidaEditFoto=''; renderComidaEditFoto(); }
+async function guardarEditarComidaRegistrada(id){
+  const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
+  const btn = document.getElementById('ceGuardarBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+  try{
+    const row = Object.assign({}, r, {
+      Descripcion: document.getElementById('ceDescripcion').value.trim() || r.Descripcion,
+      Fecha: document.getElementById('ceFecha').value || r.Fecha,
+      Slot: document.getElementById('ceSlot').value || r.Slot,
+      Estrellas: window._comidaEditEstrellas || '',
+      Notas: document.getElementById('ceNotas').value,
+      FotoURL: window._comidaEditFoto || ''
+    });
+    const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
+    if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
+    const idx = DATA.nutricion_log.findIndex(x=>x.ID===id);
+    if(idx>=0) DATA.nutricion_log[idx] = row;
+    guardarCacheLocal();
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    showToast('✓ Guardado');
+    renderComidas(); renderInicioHoy();
+  }catch(e){
+    console.error('guardarEditarComidaRegistrada', e);
+    showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='💾 Guardar'; }
+  }
 }
 function abrirAsignarSlot(fecha, slot){
   const recetas = activos(DATA.recetas);
@@ -2442,7 +2544,7 @@ async function borrarRegistroComida(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
   r.Papelera = true;
   guardarCacheLocal();
-  renderComidas();
+  renderComidas(); renderInicioHoy();
   await apiPost('saveRow', { table:'NUTRICION_LOG', row:r });
 }
 function abrirPreferenciasComida(){
@@ -2632,7 +2734,7 @@ async function guardarComidaRegistrada(){
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     showToast('✓ Comida registrada');
     window._comidaFotoRecortada = null; window._comidaAnalisis = null;
-    renderComidas();
+    renderComidas(); renderInicioHoy();
   }catch(e){
     console.error('guardarComidaRegistrada', e);
     showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
