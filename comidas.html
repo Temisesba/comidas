@@ -580,26 +580,43 @@ function autoActualizarSiVersionVieja(){
   if(anterior && anterior !== BUILD_VERSION){ forceReloadApp(); return true; }
   return false;
 }
+// Bug real reportado: "cada que entro me pide la URL" — auditado a
+// fondo (forceReloadApp no toca localStorage, el service worker es
+// network-first, el único removeItem('comidas_gas_url') vive detrás de
+// una confirmación explícita) sin encontrar la causa exacta, pero SÍ un
+// hueco real de diseño: antes, ocultar #setupScreen dependía de que
+// TODO el resto de boot() (leer IndexedDB, normalizeData, migrar caché
+// vieja) terminara sin tronar — si algo de eso lanzaba una excepción no
+// atrapada, boot() se detenía ahí mismo y #setupScreen se quedaba
+// visible PARA SIEMPRE aunque la URL siguiera perfectamente guardada,
+// disfrazándose exactamente de "se te olvidó tu URL". Ahora esconder
+// #setupScreen es lo PRIMERO que pasa en cuanto se sabe que sí hay URL
+// guardada — ya no depende de que cargar los datos en caché salga bien.
 async function boot(){
   if(autoActualizarSiVersionVieja()) return;
-  let cached = null;
-  try{ cached = await idbGet(IDB_KEY_DATA); }catch(e){ console.warn('No se pudo leer la copia local de IndexedDB:', e); }
-  if(cached){ DATA = normalizeData(cached); }
-  else{
-    // Migración de una sola vez desde versiones viejas que guardaban esto en
-    // localStorage (antes de moverlo a IndexedDB) — así no se pierde la
-    // copia offline que ya existía, y de paso se libera ese espacio de
-    // vuelta al cupo compartido con las otras apps.
-    const viejo = localStorage.getItem('comidas_data_cache');
-    if(viejo){
-      try{ DATA = normalizeData(JSON.parse(viejo)); }catch(e){}
-      localStorage.removeItem('comidas_data_cache');
-      guardarCacheLocal();
+  if(!needsSetup()) document.getElementById('setupScreen').classList.add('hidden');
+  try{
+    let cached = null;
+    try{ cached = await idbGet(IDB_KEY_DATA); }catch(e){ console.warn('No se pudo leer la copia local de IndexedDB:', e); }
+    if(cached){ DATA = normalizeData(cached); }
+    else{
+      // Migración de una sola vez desde versiones viejas que guardaban esto en
+      // localStorage (antes de moverlo a IndexedDB) — así no se pierde la
+      // copia offline que ya existía, y de paso se libera ese espacio de
+      // vuelta al cupo compartido con las otras apps.
+      const viejo = localStorage.getItem('comidas_data_cache');
+      if(viejo){
+        try{ DATA = normalizeData(JSON.parse(viejo)); }catch(e){}
+        localStorage.removeItem('comidas_data_cache');
+        guardarCacheLocal();
+      }
     }
+    if(needsSetup()){ return; }
+    renderUserScreen();
+  }catch(e){
+    console.error('Error inesperado arrancando la app:', e);
+    if(!needsSetup()) showToast('Hubo un problema cargando tus datos guardados — intenta recargar la app');
   }
-  if(needsSetup()){ return; }
-  document.getElementById('setupScreen').classList.add('hidden');
-  renderUserScreen();
 }
 async function refreshData(){
   const r = await apiPost('getAll', {});
