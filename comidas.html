@@ -330,6 +330,7 @@ function uid(){ return (crypto.randomUUID ? crypto.randomUUID() : 'id-'+Date.now
 function showToast(msg){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(window._toastT); window._toastT=setTimeout(()=>t.classList.remove('show'),2800); }
 function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function hoyLocalISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function horaActualHHMM(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtFecha(iso){ if(!iso) return ''; const [y,m,d] = String(iso).slice(0,10).split('-'); return d && m && y ? d+'/'+m+'/'+y : iso; }
 function fmtHora(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return ''; return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtMoneda(v){ if(v===null||v===undefined||v==='') return ''; return '$'+Number(v).toFixed(2); }
@@ -2595,11 +2596,15 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo){
       <p class="hint">${SLOT_ICONOS[slotFijo]||''} <b>${escAttr(slotFijo)}</b> — ${fmtFecha(fechaFija)}</p>
       <input type="hidden" id="comidaFecha" value="${escAttr(fechaFija)}">
       <input type="hidden" id="comidaSlot" value="${escAttr(slotFijo)}">
+      <div class="field"><label>Hora</label>
+        <input type="time" id="comidaHora" value="${horaActualHHMM()}" style="width:auto">
+      </div>
     ` : `
     <div class="field"><label>Cuándo</label>
-      <div style="display:flex;gap:8px">
-        <input type="date" id="comidaFecha" value="${hoyLocalISO()}" style="flex:1">
-        <select id="comidaSlot" style="flex:1">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===guessSlotActual()?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input type="date" id="comidaFecha" value="${hoyLocalISO()}" style="flex:1;min-width:130px">
+        <select id="comidaSlot" style="flex:1;min-width:110px">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===guessSlotActual()?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select>
+        <input type="time" id="comidaHora" value="${horaActualHHMM()}" style="flex:0 0 100px">
       </div>
     </div>`}
     <div class="field"><label>Comida</label>
@@ -2755,8 +2760,11 @@ async function guardarComidaRegistrada(){
       if(up.ok) fotoUrl = up.url;
       else showToast('No se pudo subir la foto (se guarda sin foto): '+(up.error||'sin conexión'));
     }
+    const fechaVal = document.getElementById('comidaFecha').value || hoyLocalISO();
+    const horaVal = (document.getElementById('comidaHora')||{}).value || horaActualHHMM();
+    const horaDate = new Date(fechaVal+'T'+horaVal+':00');
     const row = {
-      ID: uid(), Usuario: usuarioActivo.ID, Fecha: document.getElementById('comidaFecha').value || hoyLocalISO(), Hora: new Date().toISOString(),
+      ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: isNaN(horaDate) ? new Date().toISOString() : horaDate.toISOString(),
       Slot: document.getElementById('comidaSlot').value || guessSlotActual(),
       Descripcion: descripcion, FotoURL: fotoUrl,
       Energia: valores.Energia, Grasas: valores.Grasas, GrasasSaturadas: valores.GrasasSaturadas,
