@@ -313,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Bacalar';
+const BUILD_VERSION = 'Tulum';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1131,7 +1131,7 @@ function renderInicioHoy(){
     // Slot vacío: toca y va directo a elegir receta o registrar con IA para
     // HOY mismo, sin pasar primero por la pestaña Comidas. Slot con algo:
     // mejor mandar a Comidas, ahí se puede ver/editar cada cosa por separado.
-    const onclick = items.length ? `switchTab('comidas')` : `abrirComidaSlot('${hoyISO}','${slot}')`;
+    const onclick = items.length ? `switchTab('comidas')` : `abrirRegistrarComidaModal('${hoyISO}','${slot}')`;
     return `<div class="inv-item" onclick="${onclick}" style="cursor:pointer">
       <div class="info"><div class="nombre">${SLOT_ICONOS[slot]} ${slot}</div>
         <div class="meta${items.length?'':' hint'}">${items.length?items.join(' · '):'Nada todavía — pendiente, toca para agregar'}</div>
@@ -2357,7 +2357,7 @@ function renderCalendario(){
           primero = false; return fila;
         }).join('');
         const hayAlgo = entries.length + regs.length > 0;
-        const filaAgregar = `<div class="slot-row vacio" onclick="abrirComidaSlot('${fecha}','${slot}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'+ Agregar'}</span></div>`;
+        const filaAgregar = `<div class="slot-row vacio" onclick="abrirRegistrarComidaModal('${fecha}','${slot}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'+ Agregar'}</span></div>`;
         return filasCalendario + filasRegistros + filaAgregar;
       }).join('') + `</div>`;
   }).join('');
@@ -2441,51 +2441,12 @@ async function guardarEditarComidaRegistrada(id){
     if(btn){ btn.disabled=false; btn.textContent='💾 Guardar'; }
   }
 }
-// Punto de entrada único al tocar un slot vacío (o "+ Agregar otra") — deja
-// elegir entre las dos formas de llenarlo: una receta que ya tiene (escribe
-// en CALENDARIO, como siempre) o registrar con foto/texto vía IA (escribe
-// en NUTRICION_LOG). Fecha y slot ya vienen decididos por dónde tocó, así
-// que las dos pantallas siguientes solo los muestran, no los vuelven a
-// preguntar.
-function abrirComidaSlot(fecha, slot){
-  const html = `
-    <h3>${SLOT_ICONOS[slot]||''} ${slot} — ${fmtFecha(fecha)}</h3>
-    <p class="hint">¿Qué quieres agregar aquí?</p>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
-      <button class="btn" onclick="cerrarModalYAbrir(()=>abrirAsignarSlot('${fecha}','${slot}'))">📖 Una receta que ya tengo</button>
-      <button class="btn secondary" onclick="cerrarModalYAbrir(()=>abrirRegistrarComidaModal('${fecha}','${slot}'))">📸 Registrar con foto o texto (IA)</button>
-    </div>
-    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button></div>`;
-  abrirModal(html);
-}
-function abrirAsignarSlot(fecha, slot){
-  const recetas = activos(DATA.recetas);
-  const html = `
-    <h3>${SLOT_ICONOS[slot]||''} ${slot} — ${fmtFecha(fecha)}</h3>
-    <div class="field"><label>Receta</label>
-      <select id="calReceta"><option value="">— Texto libre —</option>${recetas.map(r=>`<option value="${r.ID}">${escAttr(r.Nombre)}</option>`).join('')}</select>
-    </div>
-    <div class="field"><label>O escribe algo libre</label><input type="text" id="calTexto" placeholder="ej: comer fuera"></div>
-    <div class="actions">
-      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
-      <button class="btn" id="calGuardarBtn" onclick="guardarAsignacion('${fecha}','${slot}')">💾 Guardar</button>
-    </div>`;
-  abrirModal(html, {confirmarCierre:true});
-}
-async function guardarAsignacion(fecha, slot){
-  const recetaId = document.getElementById('calReceta').value;
-  const texto = document.getElementById('calTexto').value.trim();
-  if(!recetaId && !texto){ showToast('Elige una receta o escribe algo'); return; }
-  const btn = document.getElementById('calGuardarBtn');
-  btn.disabled = true; btn.textContent = 'Guardando…';
-  const row = { ID: uid(), Fecha: fecha, Slot: slot, RecetaID: recetaId||'', TextoLibre: recetaId?'':texto, Cocinado:false, Privado:false, Usuario: usuarioActivo.ID, Papelera:false };
-  const r = await apiPost('saveRow', { table:'CALENDARIO', row });
-  if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
-  DATA.calendario.push(row);
-  guardarCacheLocal();
-  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-  renderCalendario();
-}
+// abrirComidaSlot/abrirAsignarSlot/guardarAsignacion (dos pantallas
+// distintas según si venías de "una receta que ya tengo" o "registrar con
+// IA") se quitaron — pedido explícito: "debería ser la misma vista
+// independientemente si viene de receta o yo la pongo". Un slot vacío
+// ahora va directo a abrirRegistrarComidaModal(fecha, slot), que ya trae
+// buscador de recetas Y foto/texto/IA en una sola pantalla (ver más abajo).
 function abrirAccionesSlot(entryId){
   const entry = DATA.calendario.find(e=>e.ID===entryId); if(!entry) return;
   const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
@@ -2606,13 +2567,21 @@ function guessSlotActual(){
 // tocado, no se vuelve a preguntar cuándo — solo se confirma con un texto
 // (y viaja en inputs ocultos para que analizarComidaIA los lea igual). Sin
 // argumentos (botón suelto "Registrar comida") sigue dejando elegir.
+// Receta (opcional, buscando en las que ya tienes guardadas) y Descripción
+// (texto libre) conviven en la misma pantalla — antes eran dos flujos
+// separados (uno sin IA/carbos/estrellas/notas para "una receta que ya
+// tengo", otro con todo eso para "registrar con foto/texto") — pedido
+// explícito: misma vista sin importar de dónde venga.
 function abrirRegistrarComidaModal(fechaFija, slotFijo){
   window._comidaFotoRecortada = null;
   window._comidaAnalisis = null;
-  const dirigido = !!(fechaFija && slotFijo);
+  window._comidaRecetaId = '';
+  window._comidaDirigido = !!(fechaFija && slotFijo);
+  const dirigido = window._comidaDirigido;
+  const recetas = activos(DATA.recetas);
   const html = `
     <h3>📸 Registrar / consultar una comida</h3>
-    <p class="hint">Manda una foto, escribe qué comiste, o ambas — entre más info, mejor la estimación.</p>
+    <p class="hint">Elige una receta que ya tengas, escribe qué comiste, o manda una foto — cualquier combinación sirve, entre más info, mejor la estimación.</p>
     ${dirigido ? `
       <p class="hint">${SLOT_ICONOS[slotFijo]||''} <b>${escAttr(slotFijo)}</b> — ${fmtFecha(fechaFija)}</p>
       <input type="hidden" id="comidaFecha" value="${escAttr(fechaFija)}">
@@ -2624,11 +2593,17 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo){
         <select id="comidaSlot" style="flex:1">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===guessSlotActual()?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select>
       </div>
     </div>`}
+    <div class="field"><label>Receta (opcional — búscala si ya la tienes guardada)</label>
+      <select id="comidaReceta" onchange="actualizarBotonAnalizarComida()">
+        <option value="">— Ninguna, es otra cosa —</option>
+        ${recetas.map(r=>`<option value="${r.ID}">${escAttr(r.Nombre)}</option>`).join('')}
+      </select>
+    </div>
     <div class="field"><label>Foto (opcional)</label>
       <div id="comidaFotoCrop"></div>
       <input type="file" accept="image/*" onchange="elegirFotoComida(this.files)">
     </div>
-    <div class="field"><label>Descripción (opcional)</label>
+    <div class="field"><label>Descripción (opcional${recetas.length?', ej. si le agregaste/quitaste algo a la receta':''})</label>
       <textarea id="comidaTexto" rows="2" placeholder="ej. dos tacos de bistec con salsa" oninput="actualizarBotonAnalizarComida()"></textarea>
     </div>
     <div class="actions">
@@ -2661,22 +2636,31 @@ function quitarFotoComida(){
 function actualizarBotonAnalizarComida(){
   const btn = document.getElementById('comidaAnalizarBtn'); if(!btn) return;
   const texto = document.getElementById('comidaTexto');
-  btn.disabled = !(window._comidaFotoRecortada || (texto && texto.value.trim()));
+  const receta = document.getElementById('comidaReceta');
+  btn.disabled = !(window._comidaFotoRecortada || (texto && texto.value.trim()) || (receta && receta.value));
 }
 async function analizarComidaIA(){
   const btn = document.getElementById('comidaAnalizarBtn');
   btn.disabled = true; btn.textContent = '🤖 Pensando…';
   try{
-    const texto = document.getElementById('comidaTexto').value.trim();
+    const recetaEl = document.getElementById('comidaReceta');
+    const recetaId = recetaEl ? recetaEl.value : '';
+    const receta = recetaId ? findReceta(recetaId) : null;
+    const textoLibre = document.getElementById('comidaTexto').value.trim();
+    // Con receta elegida, su nombre ES el texto base que analiza la IA
+    // (igual que si lo hubieras escrito a mano) — lo que pongas en
+    // Descripción se agrega como detalle extra, no lo reemplaza.
+    const texto = receta ? (receta.Nombre + (textoLibre?(' — '+textoLibre):'')) : textoLibre;
     const foto = window._comidaFotoRecortada;
     window._comidaFecha = document.getElementById('comidaFecha').value || hoyLocalISO();
     window._comidaSlot = document.getElementById('comidaSlot').value || guessSlotActual();
+    window._comidaRecetaId = recetaId;
     const r = await apiPost('analizarComidaConIA', {
       base64: foto?foto.base64:'', mimeType: foto?foto.mimeType:'', texto,
       alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||''
     }, 45000);
     if(!r.ok){ showToast('No se pudo analizar: '+(r.error||'sin conexión')); return; }
-    window._comidaTextoOriginal = texto;
+    window._comidaTextoOriginal = receta ? receta.Nombre : texto;
     // Se cierra el modal del formulario antes de abrir el de revisión — si
     // no, se apilan dos overlays uno encima del otro (el de abajo queda
     // "vivo" y puede reaparecer si se cierra el de revisión sin querer).
@@ -2763,7 +2747,8 @@ async function guardarComidaRegistrada(){
       Carbohidratos: valores.Carbohidratos, Azucares: valores.Azucares, Fibra: valores.Fibra,
       Proteina: valores.Proteina, Sal: valores.Sal, Modelo: r.modelo||'', Papelera: false,
       Estrellas: window._comidaNuevaEstrellas || '',
-      Notas: (document.getElementById('comidaNotas')||{}).value || ''
+      Notas: (document.getElementById('comidaNotas')||{}).value || '',
+      RecetaID: window._comidaRecetaId || ''
     };
     const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
     if(!res.ok){
@@ -2771,11 +2756,20 @@ async function guardarComidaRegistrada(){
       return;
     }
     DATA.nutricion_log.push(row);
+    // Si se abrió desde un slot del Calendario, también queda anotado ahí
+    // igual que antes (se ve en ese día/slot, y si es una receta se puede
+    // seguir usando "Marcar cocinado" desde ahí) — además de contar
+    // calorías en NUTRICION_LOG, que es lo nuevo de la vista unificada.
+    if(window._comidaDirigido){
+      const calRow = { ID: uid(), Fecha: row.Fecha, Slot: row.Slot, RecetaID: window._comidaRecetaId||'', TextoLibre: window._comidaRecetaId?'':row.Descripcion, Cocinado:false, Privado:false, Usuario: usuarioActivo.ID, Papelera:false };
+      const resCal = await apiPost('saveRow', { table:'CALENDARIO', row:calRow });
+      if(resCal.ok) DATA.calendario.push(calRow);
+    }
     guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     showToast('✓ Comida registrada');
-    window._comidaFotoRecortada = null; window._comidaAnalisis = null;
-    renderComidas(); renderInicioHoy();
+    window._comidaFotoRecortada = null; window._comidaAnalisis = null; window._comidaRecetaId = ''; window._comidaDirigido = false;
+    renderComidas(); renderInicioHoy(); renderCalendario();
   }catch(e){
     console.error('guardarComidaRegistrada', e);
     showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
