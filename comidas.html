@@ -2858,6 +2858,14 @@ function borrarParaSiempre(tabla, id){
 //  Arranque
 // ============================================================
 boot();
+
+// Deep link desde App Completa: abre directo "Registrar comida".
+// setTimeout le da tiempo a boot() antes de abrir el modal encima.
+window.addEventListener('load', () => {
+  if (location.hash === '#nueva-comida') {
+    setTimeout(() => { try { switchTab('comidas'); abrirRegistrarComidaModal(); } catch (e) {} }, 400);
+  }
+});
 </script>
 </body>
 </html>
