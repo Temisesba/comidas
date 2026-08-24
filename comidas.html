@@ -313,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Tulum';
+const BUILD_VERSION = 'Merida';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1146,7 +1146,17 @@ function renderInicioHoy(){
   const slotsMostrar = SLOTS.filter(s=>s!=='Preparado');
   cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div><div class="slot-list">` + slotsMostrar.map(slot=>{
     const regsSlot = registros.filter(r=>r.Slot===slot);
-    const calSlot = calEntradas.filter(e=>e.Slot===slot);
+    const calSlotTodas = calEntradas.filter(e=>e.Slot===slot);
+    // Mismo dedupe que en la pestaña Comidas: una fila de CALENDARIO que
+    // coincide con un registro ya no se muestra aparte — su "hecho" se
+    // junta con el renglón de la comida.
+    const cocinadoPorReg = {};
+    const calSlot = calSlotTodas.filter(e=>{
+      const match = regsSlot.find(r => (e.RecetaID && r.RecetaID===e.RecetaID) || (!e.RecetaID && r.Descripcion===e.TextoLibre));
+      if(!match) return true;
+      if(esVerdadero(e.Cocinado)) cocinadoPorReg[match.ID] = true;
+      return false;
+    });
     const hayAlgo = regsSlot.length + calSlot.length > 0;
     let primero = true;
     const filasCalendario = calSlot.map(e=>{
@@ -1155,7 +1165,7 @@ function renderInicioHoy(){
       primero = false; return fila;
     }).join('');
     const filasRegistros = regsSlot.map(r=>{
-      const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido">🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal</span></div>`;
+      const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido">${cocinadoPorReg[r.ID]?'✅ ':''}🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal</span></div>`;
       primero = false; return fila;
     }).join('');
     const filaAgregar = `<div class="slot-row vacio" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'Nada todavía — toca para agregar'}</span></div>`;
@@ -2366,8 +2376,20 @@ function renderCalendario(){
         // todas, y siempre queda un renglón "+ Agregar otra" al final. Las
         // comidas registradas con IA (nutricion_log) se muestran aquí
         // mismo, mezcladas con lo planeado del calendario.
-        const entries = entradas.filter(e=>e.Fecha===fecha && e.Slot===slot);
+        const entriesTodas = entradas.filter(e=>e.Fecha===fecha && e.Slot===slot);
         const regs = registros.filter(r=>r.Fecha===fecha && r.Slot===slot);
+        // Antes registrar una comida desde un slot también creaba una fila
+        // en CALENDARIO además de NUTRICION_LOG — la misma comida salía DOS
+        // veces en la lista. Ya no se crea esa fila de más, pero las que
+        // quedaron de antes se ocultan aquí (si coinciden con un registro)
+        // y su "hecho" se junta en el renglón de la comida en vez de perderse.
+        const cocinadoPorReg = {};
+        const entries = entriesTodas.filter(entry=>{
+          const match = regs.find(r => (entry.RecetaID && r.RecetaID===entry.RecetaID) || (!entry.RecetaID && r.Descripcion===entry.TextoLibre));
+          if(!match) return true;
+          if(esVerdadero(entry.Cocinado)) cocinadoPorReg[match.ID] = true;
+          return false;
+        });
         const etiquetaSlot = SLOT_ICONOS[slot]+' '+slot;
         let primero = true;
         const filasCalendario = entries.map((entry)=>{
@@ -2376,7 +2398,7 @@ function renderCalendario(){
           primero = false; return fila;
         }).join('');
         const filasRegistros = regs.map((r)=>{
-          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
+          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${cocinadoPorReg[r.ID]?'✅ ':''}🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
           primero = false; return fila;
         }).join('');
         const hayAlgo = entries.length + regs.length > 0;
@@ -2797,15 +2819,11 @@ async function guardarComidaRegistrada(){
       return;
     }
     DATA.nutricion_log.push(row);
-    // Si se abrió desde un slot del Calendario, también queda anotado ahí
-    // igual que antes (se ve en ese día/slot, y si es una receta se puede
-    // seguir usando "Marcar cocinado" desde ahí) — además de contar
-    // calorías en NUTRICION_LOG, que es lo nuevo de la vista unificada.
-    if(window._comidaDirigido){
-      const calRow = { ID: uid(), Fecha: row.Fecha, Slot: row.Slot, RecetaID: recetaId||'', TextoLibre: recetaId?'':row.Descripcion, Cocinado:false, Privado:false, Usuario: usuarioActivo.ID, Papelera:false };
-      const resCal = await apiPost('saveRow', { table:'CALENDARIO', row:calRow });
-      if(resCal.ok) DATA.calendario.push(calRow);
-    }
+    // Ya NO se crea también una fila en CALENDARIO al registrar desde un
+    // slot — se probó y la misma comida salía dos veces en la lista (el
+    // renglón del calendario y el renglón "🔥 ... kcal" del registro). El
+    // registro en NUTRICION_LOG ya trae RecetaID si aplica, así que no
+    // hace falta la fila aparte para nada — un solo renglón por comida.
     guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
     showToast('✓ Comida registrada');
