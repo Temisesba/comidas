@@ -160,7 +160,7 @@ nav.tabbar button .ic{font-size:18px}
 <body>
 <button onclick="location.href='https://temisesba.github.io/app-completa/'" title="Volver a App Completa" style="position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:8px;z-index:99999;width:34px;height:34px;border-radius:50%;border:none;background:rgba(0,0,0,.45);color:#fff;font-size:15px;display:flex;align-items:center;justify-content:center;cursor:pointer;backdrop-filter:blur(6px);box-shadow:0 1px 4px rgba(0,0,0,.3);">🏠</button>
 
-<div id="setupScreen">
+<div id="setupScreen" class="hidden">
   <div class="setup-card">
     <h2>🍲 Comidas</h2>
     <p class="hint">Pega la URL de tu Web App (Apps Script) para conectar la app a tus datos.</p>
@@ -313,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Merida';
+const BUILD_VERSION = 'Chichenitza';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -331,6 +331,7 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
 function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function hoyLocalISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function horaActualHHMM(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function horaHHMM(iso){ if(!iso) return horaActualHHMM(); const d=new Date(iso); if(isNaN(d)) return horaActualHHMM(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtFecha(iso){ if(!iso) return ''; const [y,m,d] = String(iso).slice(0,10).split('-'); return d && m && y ? d+'/'+m+'/'+y : iso; }
 function fmtHora(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return ''; return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtMoneda(v){ if(v===null||v===undefined||v==='') return ''; return '$'+Number(v).toFixed(2); }
@@ -594,7 +595,13 @@ function autoActualizarSiVersionVieja(){
 // guardada — ya no depende de que cargar los datos en caché salga bien.
 async function boot(){
   if(autoActualizarSiVersionVieja()) return;
-  if(!needsSetup()) document.getElementById('setupScreen').classList.add('hidden');
+  // #setupScreen ahora empieza oculto en el HTML (antes era el estado
+  // visible por default, así que en cada carga se alcanzaba a VER un
+  // parpadeo pidiendo la URL antes de que este script corriera y lo
+  // ocultara — se sentía como "me la vuelve a pedir" aunque nunca se
+  // hubiera perdido). Aquí se decide una sola vez, apenas es posible.
+  if(needsSetup()) document.getElementById('setupScreen').classList.remove('hidden');
+  else document.getElementById('setupScreen').classList.add('hidden');
   try{
     let cached = null;
     try{ cached = await idbGet(IDB_KEY_DATA); }catch(e){ console.warn('No se pudo leer la copia local de IndexedDB:', e); }
@@ -2369,7 +2376,13 @@ function renderCalendario(){
     </div>`;
   document.getElementById('calendarioLista').innerHTML = nav + dias.map((fecha)=>{
     const etiqueta = fecha===hoyISO ? 'Hoy' : new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
-    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>` +
+    const metaDia = Number(usuarioActivo.MetaCalorias)||0;
+    const consumidoDia = registros.filter(r=>r.Fecha===fecha).reduce((s,r)=>s+(Number(r.Energia)||0),0);
+    const balanceDia = metaDia - consumidoDia;
+    const resumenDia = metaDia
+      ? `${Math.round(consumidoDia)} / ${metaDia} kcal · ${balanceDia>=0?'faltan '+Math.round(balanceDia):'⚠️ pasado por '+Math.round(-balanceDia)}`
+      : (consumidoDia ? `${Math.round(consumidoDia)} kcal` : '');
+    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>${resumenDia?`<div class="hint" style="margin:-4px 0 8px">${resumenDia}</div>`:''}` +
       SLOTS.map(slot=>{
         // Un slot puede tener VARIAS entradas el mismo día — ej. Desayuno:
         // "Bistec en su jugo" + "Agua de horchata" — así que se listan
@@ -2432,8 +2445,9 @@ function abrirEditarComidaRegistrada(id){
     <div class="field"><label>Descripción</label><input type="text" id="ceDescripcion" value="${escAttr(r.Descripcion||'')}"></div>
     <div style="display:flex;gap:8px">
       <div class="field" style="flex:1"><label>Fecha</label><input type="date" id="ceFecha" value="${escAttr(r.Fecha)}"></div>
-      <div class="field" style="flex:1"><label>Momento</label><select id="ceSlot">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===r.Slot?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select></div>
+      <div class="field" style="flex:0 0 100px"><label>Hora</label><input type="time" id="ceHora" value="${horaHHMM(r.Hora)}"></div>
     </div>
+    <div class="field"><label>Momento</label><select id="ceSlot">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===r.Slot?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select></div>
     <div class="field"><label>Calificación</label><div id="ceEstrellas"></div></div>
     <div class="field"><label>Notas</label><textarea id="ceNotas" rows="2" placeholder="cómo te supo, cómo te sentiste…">${escAttr(r.Notas||'')}</textarea></div>
     <div class="field"><label>Foto</label>
@@ -2463,9 +2477,13 @@ async function guardarEditarComidaRegistrada(id){
   const btn = document.getElementById('ceGuardarBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
   try{
+    const fechaVal = document.getElementById('ceFecha').value || r.Fecha;
+    const horaVal = (document.getElementById('ceHora')||{}).value || horaHHMM(r.Hora);
+    const horaDate = new Date(fechaVal+'T'+horaVal+':00');
     const row = Object.assign({}, r, {
       Descripcion: document.getElementById('ceDescripcion').value.trim() || r.Descripcion,
-      Fecha: document.getElementById('ceFecha').value || r.Fecha,
+      Fecha: fechaVal,
+      Hora: isNaN(horaDate) ? r.Hora : horaDate.toISOString(),
       Slot: document.getElementById('ceSlot').value || r.Slot,
       Estrellas: window._comidaEditEstrellas || '',
       Notas: document.getElementById('ceNotas').value,
