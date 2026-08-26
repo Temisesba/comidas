@@ -317,8 +317,8 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza6';
-let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
+const BUILD_VERSION = 'Palenque';
+let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
 // Comidas — esta es la sesión de Gastos elegida (una por dispositivo, mismo
@@ -497,7 +497,8 @@ function normalizeData(d){
     usuarios: d.usuarios||[], categorias: d.categorias||[], recetas: d.recetas||[],
     recetas_historial: d.recetas_historial||[], inventario: d.inventario||[],
     precios: d.precios||[], lista_compras: d.lista_compras||[], calendario: d.calendario||[],
-    nutricion_log: d.nutricion_log||[], config: d.config||[], restaurantes: d.restaurantes||[]
+    nutricion_log: d.nutricion_log||[], config: d.config||[], restaurantes: d.restaurantes||[],
+    ejercicio_log: d.ejercicio_log||[], cuerpo_log: d.cuerpo_log||[]
   };
 }
 // La copia local es solo para ver algo mientras no hay internet — el dato
@@ -553,6 +554,8 @@ function datosParaCacheLocal(){
   return Object.assign({}, DATA, {
     nutricion_log: DATA.nutricion_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
     calendario: DATA.calendario.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
+    ejercicio_log: DATA.ejercicio_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
+    cuerpo_log: DATA.cuerpo_log.slice(-100),
     recetas_historial: DATA.recetas_historial.slice(-300),
     precios: DATA.precios.slice(-500)
   });
@@ -565,7 +568,7 @@ async function guardarCacheLocal(){
     // solo lo esencial para poder abrir la app sin internet — el historial
     // se vuelve a traer solo del Sheet en cuanto haya conexión.
     try{
-      const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[] });
+      const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[], ejercicio_log:[], cuerpo_log:[] });
       await idbSet(IDB_KEY_DATA, minimo);
     }catch(e2){ console.warn('Tampoco cupo la copia mínima local:', e2); }
   }
@@ -1145,20 +1148,33 @@ function renderInicio(){
 // final para seguir registrando sin cambiar de pestaña.
 function renderInicioHoy(){
   const cal = document.getElementById('inicioCalorias');
+  const hoyISO = hoyLocalISO();
   if(cal){
-    const { meta, consumido, restante } = caloriasRestantesHoy();
+    // Arriba, solo lo realizado (igual que en la pestaña Comidas). El
+    // resumen de "faltan X de lo planeado" (todo, realizado + pendiente)
+    // se muestra aparte, debajo de "Hoy".
+    const { meta, consumido, quemado, restante } = caloriasRealizadasParaFecha(hoyISO);
     cal.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
       <div><div class="hint">Meta diaria</div><div style="font-size:18px;font-weight:700">${meta||'—'}</div></div>
       <div style="text-align:center"><div class="hint">Llevas hoy</div><div style="font-size:18px;font-weight:700">${Math.round(consumido)}</div></div>
       <div style="text-align:center"><div class="hint">Te quedan</div><div style="font-size:18px;font-weight:700;color:${meta&&restante<0?'var(--danger)':'inherit'}">${meta?Math.round(restante):'—'}</div></div>
-    </div>`;
+    </div>
+    ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas</p>`:''}`;
   }
   const cont = document.getElementById('inicioComidasHoy'); if(!cont) return;
-  const hoyISO = hoyLocalISO();
   const registros = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
   const calEntradas = activos(DATA.calendario).filter(e=>e.Fecha===hoyISO);
   const slotsMostrar = SLOTS.filter(s=>s!=='Preparado');
-  cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div><div class="slot-list">` + slotsMostrar.map(slot=>{
+  // "Faltan X de lo planeado" cuenta TODO (realizado + pendiente) — mismo
+  // cálculo que ya se ve en el calendario semanal, copiado aquí para no
+  // tener que ir a otra pestaña a verlo.
+  const metaDia = Number(usuarioActivo.MetaCalorias)||0;
+  const { consumido: consumidoPlaneado } = caloriasRestantesParaFecha(hoyISO);
+  const balancePlaneado = metaDia - consumidoPlaneado;
+  const resumenPlaneado = metaDia
+    ? `${Math.round(consumidoPlaneado)} / ${metaDia} kcal · ${balancePlaneado>=0?'faltan '+Math.round(balancePlaneado)+' de lo planeado':'⚠️ pasado por '+Math.round(-balancePlaneado)+' de lo planeado'}`
+    : '';
+  cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div>${resumenPlaneado?`<p class="hint" style="margin:-4px 0 8px">${resumenPlaneado}</p>`:''}<div class="slot-list">` + slotsMostrar.map(slot=>{
     const regsSlot = registros.filter(r=>r.Slot===slot);
     const calSlotTodas = calEntradas.filter(e=>e.Slot===slot);
     // Mismo dedupe que en la pestaña Comidas: una fila de CALENDARIO que
@@ -1179,7 +1195,8 @@ function renderInicioHoy(){
       primero = false; return fila;
     }).join('');
     const filasRegistros = regsSlot.map(r=>{
-      const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido">${cocinadoPorReg[r.ID]?'✅ ':''}🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal</span></div>`;
+      const hecho = esVerdadero(r.Realizado) || cocinadoPorReg[r.ID];
+      const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido">${hecho?'✅':'🕓'} 🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal</span></div>`;
       primero = false; return fila;
     }).join('');
     const filaAgregar = `<div class="slot-row vacio" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'Nada todavía — toca para agregar'}</span></div>`;
@@ -2418,7 +2435,8 @@ function renderCalendario(){
           primero = false; return fila;
         }).join('');
         const filasRegistros = regs.map((r)=>{
-          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${cocinadoPorReg[r.ID]?'✅ ':''}🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
+          const hecho = esVerdadero(r.Realizado) || cocinadoPorReg[r.ID];
+          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${hecho?'✅':'🕓'} 🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
           primero = false; return fila;
         }).join('');
         const hayAlgo = entries.length + regs.length > 0;
@@ -2437,11 +2455,26 @@ function abrirAccionesComidaRegistrada(id){
     ${r.Notas?`<p class="hint">📝 ${escAttr(r.Notas)}</p>`:''}
     <p class="hint">${Math.round(r.Energia||0)} kcal · Grasas ${red1(r.Grasas)}g (sat ${red1(r.GrasasSaturadas)}g) · Carbs ${red1(r.Carbohidratos)}g (az ${red1(r.Azucares)}g) · Fibra ${red1(r.Fibra)}g · Proteína ${red1(r.Proteina)}g · Sal ${red1(r.Sal)}g</p>
     <div class="actions" style="justify-content:flex-start">
+      ${esVerdadero(r.Realizado)
+        ? `<button class="btn secondary" onclick="toggleRealizadoComida('${r.ID}')">◻️ Marcar como pendiente</button>`
+        : `<button class="btn" onclick="toggleRealizadoComida('${r.ID}')">✅ Marcar como realizado</button>`}
       <button class="btn secondary" onclick="cerrarModalYAbrir(()=>abrirEditarComidaRegistrada('${r.ID}'))">✏️ Editar</button>
       <button class="btn danger" onclick="cerrarModalYAbrir(()=>borrarRegistroComida('${r.ID}'))">🗑 Quitar</button>
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
     </div>`;
   abrirModal(html);
+}
+// Un toque para confirmar/desconfirmar sin abrir el formulario completo de
+// editar — al marcar realizado, si no tenía hora se pone la de ahora
+// mismo (mismo criterio que en el registro nuevo).
+async function toggleRealizadoComida(id){
+  const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
+  r.Realizado = !esVerdadero(r.Realizado);
+  if(r.Realizado && !r.Hora) r.Hora = new Date().toISOString();
+  guardarCacheLocal();
+  document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+  renderComidas(); renderInicioHoy();
+  await apiPost('saveRow', { table:'NUTRICION_LOG', row:r });
 }
 function abrirEditarComidaRegistrada(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
@@ -2455,6 +2488,10 @@ function abrirEditarComidaRegistrada(id){
       <div class="field" style="flex:0 0 100px"><label>Hora</label><input type="time" id="ceHora" value="${horaHHMM(r.Hora)}"></div>
     </div>
     <div class="field"><label>Momento</label><select id="ceSlot">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===r.Slot?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select></div>
+    <label class="hint" style="display:flex;gap:6px;align-items:center;margin:2px 0 8px">
+      <input type="checkbox" id="ceRealizado" ${esVerdadero(r.Realizado)?'checked':''} style="width:auto">
+      Ya lo comí (realizado) — si no, se guarda como plan
+    </label>
     <div class="field"><label>Calificación</label><div id="ceEstrellas"></div></div>
     <div class="field"><label>Notas</label><textarea id="ceNotas" rows="2" placeholder="cómo te supo, cómo te sentiste…">${escAttr(r.Notas||'')}</textarea></div>
     <div class="field"><label>Foto</label>
@@ -2494,7 +2531,8 @@ async function guardarEditarComidaRegistrada(id){
       Slot: document.getElementById('ceSlot').value || r.Slot,
       Estrellas: window._comidaEditEstrellas || '',
       Notas: document.getElementById('ceNotas').value,
-      FotoURL: window._comidaEditFoto || ''
+      FotoURL: window._comidaEditFoto || '',
+      Realizado: (document.getElementById('ceRealizado')||{}).checked || false
     });
     const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
     if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
@@ -2570,10 +2608,26 @@ function caloriasRestantesParaFecha(fecha){
   return { meta, consumido, restante: meta - consumido };
 }
 function caloriasRestantesHoy(){ return caloriasRestantesParaFecha(hoyLocalISO()); }
+// A diferencia de caloriasRestantesParaFecha (que suma TODO — realizado +
+// planeado, usado para el resumen "faltan X de lo planeado" y el
+// presupuesto de las sugerencias de IA), esta solo cuenta lo que de
+// verdad ya pasó — pedido explícito de que el contador de arriba
+// (Meta diaria/Llevas hoy/Te quedan) no se mueva con planes a futuro.
+// El ejercicio del día se resta del consumo (kcal a favor).
+function caloriasRealizadasParaFecha(fecha){
+  const meta = Number(usuarioActivo.MetaCalorias)||0;
+  const consumido = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera) && esVerdadero(r.Realizado)).reduce((s,r)=>s+(Number(r.Energia)||0),0);
+  const quemado = (DATA.ejercicio_log||[]).filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera)).reduce((s,r)=>s+(Number(r.CaloriasQuemadas)||0),0);
+  return { meta, consumido, quemado, restante: meta - consumido + quemado };
+}
+function caloriasRealizadasHoy(){ return caloriasRealizadasParaFecha(hoyLocalISO()); }
 function renderNutriDashboard(){
   if(!usuarioActivo) return;
   const cont = document.getElementById('nutriDashboard'); if(!cont) return;
-  const { meta, consumido, restante } = caloriasRestantesHoy();
+  // Arriba solo cuenta lo REALIZADO (ya confirmado que se comió/pasó), no
+  // lo planeado a futuro — para eso está el resumen "faltan X de lo
+  // planeado" que se ve más abajo, en el calendario y en Inicio.
+  const { meta, consumido, quemado, restante } = caloriasRealizadasHoy();
   cont.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:wrap">
       <div><div class="hint">Meta diaria</div>
@@ -2582,6 +2636,7 @@ function renderNutriDashboard(){
       <div style="text-align:center"><div class="hint">Llevas hoy</div><div style="font-size:20px;font-weight:700">${Math.round(consumido)}</div></div>
       <div style="text-align:center"><div class="hint">Te quedan</div><div style="font-size:20px;font-weight:700;color:${meta && restante<0?'var(--danger)':'inherit'}">${meta?Math.round(restante):'—'}</div></div>
     </div>
+    ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas a "Te quedan"</p>`:''}
     ${meta?'':'<p class="hint" style="margin-top:8px">Pon tu meta diaria de calorías para empezar — lo que vayas registrando aparece abajo, por día y por Desayuno/Comida/Cena/Snack.</p>'}
   `;
 }
@@ -2663,6 +2718,10 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo, restauranteFijo){
       <div class="field"><label>Hora ${fechaFija!==hoyLocalISO()?'(déjalo vacío si todavía no pasa)':''}</label>
         <input type="time" id="comidaHora" value="${fechaFija===hoyLocalISO()?horaActualHHMM():''}" style="width:auto">
       </div>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin:-4px 0 10px">
+        <input type="checkbox" id="comidaRealizado" ${fechaFija===hoyLocalISO()?'checked':''} onchange="actualizarHoraSegunRealizado()" style="width:auto">
+        Ya lo comí (realizado) — si no, se guarda como plan
+      </label>
     ` : `
     <div class="field"><label>Cuándo</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -2670,6 +2729,10 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo, restauranteFijo){
         <select id="comidaSlot" style="flex:1;min-width:110px">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===guessSlotActual()?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select>
         <input type="time" id="comidaHora" value="${horaActualHHMM()}" style="flex:0 0 100px">
       </div>
+      <label class="hint" style="display:flex;gap:6px;align-items:center;margin:6px 0 4px">
+        <input type="checkbox" id="comidaRealizado" checked onchange="actualizarHoraSegunRealizado()" style="width:auto">
+        Ya lo comí (realizado) — si no, se guarda como plan
+      </label>
     </div>`}
     <div class="field"><label>Comida</label>
       <div style="display:flex;gap:6px;align-items:center">
@@ -2797,13 +2860,25 @@ function renderComidaNuevaEstrellas(){
 }
 // Si el día que se está agendando no es hoy, no tiene sentido que la Hora
 // arranque en el reloj actual (23:32 en un plan para dentro de dos días) —
-// se deja vacía hasta que de verdad se sepa a qué hora pasó/va a pasar.
+// se deja vacía hasta que de verdad se sepa a qué hora pasó/va a pasar. Al
+// cambiar la fecha también se ajusta el default de "Realizado" (hoy = ya
+// lo comí, otro día = plan) y de ahí se recalcula Hora con el mismo criterio.
 function actualizarHoraSegunFecha(){
   const fechaEl = document.getElementById('comidaFecha');
+  const realizadoEl = document.getElementById('comidaRealizado');
+  if(!fechaEl) return;
+  if(realizadoEl) realizadoEl.checked = (fechaEl.value === hoyLocalISO());
+  actualizarHoraSegunRealizado();
+}
+// El checkbox "Realizado" es lo que de verdad decide Hora: marcado = ya
+// pasó, se pone la hora actual (si no hay una puesta); desmarcado = plan
+// a futuro, Hora se queda en blanco hasta que sí pase.
+function actualizarHoraSegunRealizado(){
   const horaEl = document.getElementById('comidaHora');
-  if(!fechaEl || !horaEl) return;
-  const esHoy = fechaEl.value === hoyLocalISO();
-  if(esHoy){ if(!horaEl.value) horaEl.value = horaActualHHMM(); }
+  const realizadoEl = document.getElementById('comidaRealizado');
+  if(!horaEl) return;
+  const marcado = realizadoEl ? realizadoEl.checked : true;
+  if(marcado){ if(!horaEl.value) horaEl.value = horaActualHHMM(); }
   else{ horaEl.value = ''; }
 }
 function actualizarVeredictoComida(){
@@ -2892,11 +2967,12 @@ async function guardarComidaRegistrada(){
       else showToast('No se pudo subir la foto (se guarda sin foto): '+(up.error||'sin conexión'));
     }
     const fechaVal = document.getElementById('comidaFecha').value || hoyLocalISO();
-    // Si el día es hoy y no se puso hora, se asume "ahora". Si es un día
-    // distinto (plan a futuro) y se dejó vacía, se queda vacía de verdad —
-    // antes siempre caía en la hora actual, sin sentido para algo que
-    // todavía no pasa; se completa después, al editarlo, cuando sí pase.
-    const horaVal = (document.getElementById('comidaHora')||{}).value || (fechaVal===hoyLocalISO() ? horaActualHHMM() : '');
+    // Realizado manda sobre Hora — si está marcado y no se puso hora, se
+    // asume "ahora"; si no está marcado (plan a futuro) se queda vacía de
+    // verdad hasta que de verdad pase (se completa al editar/confirmar).
+    const realizadoEl = document.getElementById('comidaRealizado');
+    const realizado = realizadoEl ? realizadoEl.checked : true;
+    const horaVal = (document.getElementById('comidaHora')||{}).value || (realizado ? horaActualHHMM() : '');
     const horaDate = horaVal ? new Date(fechaVal+'T'+horaVal+':00') : null;
     // Fase D: restaurante (catálogo vinculado, no solo texto libre — pedido
     // explícito) + costo opcional que, si se marca la casilla, también se
@@ -2921,7 +2997,8 @@ async function guardarComidaRegistrada(){
       Estrellas: window._comidaNuevaEstrellas || '',
       Notas: (document.getElementById('comidaNotas')||{}).value || '',
       RecetaID: recetaId || '',
-      RestauranteID: restauranteId || '', Costo: costo
+      RestauranteID: restauranteId || '', Costo: costo,
+      Realizado: realizado
     };
     const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
     if(!res.ok){
