@@ -352,7 +352,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Bacalar2';
+const BUILD_VERSION = 'Ekbalam';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1267,17 +1267,20 @@ async function pedirIdeaIA(){
     <ul style="margin:0;padding-left:18px">${(idea.ingredientes||[]).map(i=>`<li>${escAttr(i.nombre)} ${escAttr(i.cantidad||'')} ${escAttr(i.unidad||'')}</li>`).join('')}</ul>
     <p style="margin:8px 0 4px;font-weight:600">Pasos:</p>
     <ol style="margin:0;padding-left:18px">${(idea.pasos||[]).map(p=>`<li>${escAttr(p)}</li>`).join('')}</ol>
+    ${idea.energia?`<p class="hint" style="margin-top:8px">Por porción: ${Math.round(idea.energia)} kcal · grasas ${red1(idea.grasas)}g · carbos ${red1(idea.carbohidratos)}g · proteína ${red1(idea.proteina)}g</p>`:''}
     <p class="hint" style="margin-top:8px">🤖 ${mensajeModelo(r,'Generado')}</p>
     <button class="btn" style="margin-top:8px" onclick="guardarIdeaComoReceta()">💾 Guardar como receta</button>
   </div>`;
 }
 async function guardarIdeaComoReceta(){
   const idea = window._ultimaIdeaIA; if(!idea) return;
-  const row = {
+  const macros = {};
+  NUTRI_CAMPOS.forEach(([campo,key])=>{ macros[campo] = Number(idea[key])||0; });
+  const row = Object.assign({
     ID: uid(), Nombre: idea.nombre||'Idea de la IA', Categoria: '', TiempoMin: idea.tiempoMin||'', Porciones: idea.porciones||'',
     IngredientesJSON: JSON.stringify(idea.ingredientes||[]), Pasos: (idea.pasos||[]).join('\n'), FotoURL: '',
     Favorito: false, Privado: false, Usuario: usuarioActivo.ID, FechaAlta: hoyLocalISO(), Papelera: false
-  };
+  }, macros);
   const r = await apiPost('saveRow', { table:'RECETAS', row });
   if(!r.ok){ showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   DATA.recetas.push(row);
@@ -1541,6 +1544,13 @@ function abrirEditorReceta(id){
       <div class="field"><label>Tiempo (min)</label><input type="number" id="edTiempo" value="${r?escAttr(r.TiempoMin):''}"></div>
     </div>
     <div class="field"><label>Porciones</label><input type="number" id="edPorciones" value="${r?escAttr(r.Porciones):''}"></div>
+    <div class="field">
+      <label>Macros por porción (opcional)</label>
+      <button type="button" class="btn ghost" id="edMacrosBtn" onclick="calcularMacrosReceta()" style="margin-bottom:8px">🤖 Calcular macros con IA</button>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 12px">
+        ${NUTRI_CAMPOS.map(([campo,key,unidad])=>`<div class="field" style="margin:0"><label>${NUTRI_ETIQUETAS[campo]} (${unidad})</label><input type="number" step="0.1" id="edMacro_${campo}" value="${r?red1(r[campo]):0}"></div>`).join('')}
+      </div>
+    </div>
     <div class="field"><label>Fotos</label>
       <div id="edFotosGaleria"></div>
       <input type="file" accept="image/*" multiple id="edFotoInput" onchange="subirVariasFotosDesdeInput(this.files,'edFotoCrop', url=>{ editorFotos.push(url); renderEditorFotos(); })">
@@ -1713,7 +1723,31 @@ async function sugerirRecetaIA(){
   if(idea.pasos && idea.pasos.length) document.getElementById('edPasos').value = idea.pasos.join('\n');
   if(idea.ingredientes && idea.ingredientes.length) editorIngredientes = idea.ingredientes;
   renderEditorIngredientes();
+  NUTRI_CAMPOS.forEach(([campo,key])=>{ if(idea[key]!==undefined){ const el = document.getElementById('edMacro_'+campo); if(el) el.value = red1(idea[key]); } });
   showToast('🤖 '+mensajeModelo(r,'Sugerido'));
+}
+// Calcula los macros por porción con IA a partir del nombre+ingredientes ya
+// escritos — separado de "Sugerir con IA" (que inventa la receta entera)
+// porque puede usarse también en una receta ya escrita a mano, sin querer
+// que la IA reinvente ingredientes/pasos.
+async function calcularMacrosReceta(){
+  const nombre = document.getElementById('edNombre').value.trim();
+  const porciones = document.getElementById('edPorciones').value;
+  const ingredientes = editorIngredientes.filter(i=>i.nombre.trim()).map(i=>({nombre:i.nombre, cantidad:i.cantidad, unidad:i.unidad}));
+  if(!nombre && !ingredientes.length){ showToast('Escribe al menos el nombre o los ingredientes'); return; }
+  const btn = document.getElementById('edMacrosBtn');
+  if(btn){ btn.disabled=true; btn.textContent='🤖 Calculando…'; }
+  try{
+    const r = await apiPost('estimarMacrosRecetaConIA', { nombre, porciones, ingredientes }, 45000);
+    if(!r.ok){ showToast('No se pudo calcular: '+(r.error||'sin conexión')); return; }
+    NUTRI_CAMPOS.forEach(([campo,key])=>{ const el = document.getElementById('edMacro_'+campo); if(el) el.value = red1(r[key]); });
+    showToast('🤖 '+mensajeModelo(r,'Calculado'));
+  }catch(e){
+    console.error('calcularMacrosReceta', e);
+    showToast('Error inesperado: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🤖 Calcular macros con IA'; }
+  }
 }
 async function guardarReceta(id){
   const nombre = document.getElementById('edNombre').value.trim();
@@ -1721,7 +1755,9 @@ async function guardarReceta(id){
   const btn = document.getElementById('edGuardarBtn');
   btn.disabled = true; btn.textContent = 'Guardando…';
   const anterior = id ? findReceta(id) : null;
-  const row = {
+  const macros = {};
+  NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('edMacro_'+campo); macros[campo] = el ? (Number(el.value)||0) : 0; });
+  const row = Object.assign({
     ID: id || uid(),
     Nombre: nombre,
     Categoria: document.getElementById('edCategoria').value,
@@ -1736,7 +1772,7 @@ async function guardarReceta(id){
     Usuario: anterior ? anterior.Usuario : usuarioActivo.ID,
     FechaAlta: anterior ? anterior.FechaAlta : hoyLocalISO(),
     Papelera: false
-  };
+  }, macros);
   const r = await apiPost('saveRow', { table:'RECETAS', row });
   if(!r.ok){ btn.disabled=false; btn.textContent='💾 Guardar'; showToast('No se pudo guardar: '+(r.error||'sin conexión')); return; }
   const idx = DATA.recetas.findIndex(x=>x.ID===row.ID);
@@ -2941,6 +2977,16 @@ function elegirRecetaComida(id){
   document.getElementById('comidaTexto').value = r.Nombre;
   window._comidaRecetaId = id;
   document.getElementById('comidaRecetasLista').style.display = 'none';
+  // Si la receta ya tiene sus macros guardados (calculados con IA o a mano
+  // en el editor), se llenan solos aquí — ya no hace falta volver a
+  // Analizar. Si la receta no tiene macros (todo en 0), se dejan como
+  // están y 🤖 Analizar sigue disponible como respaldo.
+  const tieneMacros = NUTRI_CAMPOS.some(([campo])=>Number(r[campo])>0);
+  if(tieneMacros){
+    NUTRI_CAMPOS.forEach(([campo])=>{ const el = document.getElementById('comidaCampo_'+campo); if(el) el.value = red1(r[campo]); });
+    actualizarVeredictoComida();
+    showToast('✓ Macros de la receta cargados');
+  }
 }
 async function analizarComidaIA(){
   const texto = document.getElementById('comidaTexto').value.trim();
