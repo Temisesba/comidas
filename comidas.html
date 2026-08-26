@@ -232,6 +232,7 @@ nav.tabbar button .ic{font-size:18px}
         <button class="btn ghost" style="flex:1" onclick="abrirPanelSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
+      <button class="btn ghost block" style="margin-bottom:14px" onclick="abrirInformesModal()">📊 Informes</button>
       <div class="card"><div class="body" id="comidaActividadHoy"></div></div>
       <div id="nutriSugerencia"></div>
       <div id="calendarioLista"></div>
@@ -279,7 +280,7 @@ nav.tabbar button .ic{font-size:18px}
       <div class="card"><div class="body">
         <h3>🧍 Estatura</h3>
         <input type="number" id="cfgEstaturaInput" placeholder="ej. 160" style="width:90px" onchange="guardarEstatura(this.value)"> <span class="hint">cm</span>
-        <p class="hint" style="margin-top:4px">Se usa junto con tu peso para calcular mejor las calorías quemadas al hacer ejercicio.</p>
+        <p class="hint" style="margin-top:4px">Se usa junto con tu peso para calcular mejor las calorías quemadas al hacer ejercicio, y para tu IMC.</p>
       </div></div>
 
       <div class="card"><div class="body">
@@ -352,7 +353,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Ekbalam';
+const BUILD_VERSION = 'Calakmul';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -3405,6 +3406,108 @@ async function borrarEjercicioRegistrado(id){
 }
 
 // ============================================================
+//  Informes — gráfica semanal de calorías por día, apiladas por momento
+//  del día (Desayuno/Comida/Cena/Snack), con línea de meta. Solo cuenta
+//  lo REALIZADO (mismo criterio que el contador de arriba) — es un
+//  reporte de lo que de verdad pasó, no de lo planeado. Sin librería de
+//  gráficas (no existe ninguna en la app) — SVG hecho a mano, simple pero
+//  suficiente para 7 barras apiladas.
+// ============================================================
+const SLOT_COLORES_INFORME = { Desayuno:'#f4b400', Comida:'#4a90d9', Cena:'#e67e22', Snack:'#26a69a' };
+function inicioSemana(d){
+  const r = new Date(d);
+  const dia = r.getDay();
+  const diff = (dia===0 ? -6 : 1-dia);
+  r.setDate(r.getDate()+diff);
+  r.setHours(0,0,0,0);
+  return r;
+}
+function fmtFechaCorta(d){ const t = d.toLocaleDateString('es-MX',{day:'numeric',month:'short'}); return t.charAt(0).toUpperCase()+t.slice(1); }
+function datosInformesSemana(lunes){
+  const dias = [];
+  for(let i=0;i<7;i++){ const d = new Date(lunes); d.setDate(lunes.getDate()+i); dias.push(fechaLocalISO(d)); }
+  const meta = Number(usuarioActivo.MetaCalorias)||0;
+  const porDia = dias.map(fecha=>{
+    const filas = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera) && esVerdadero(r.Realizado));
+    const porSlot = {};
+    Object.keys(SLOT_COLORES_INFORME).forEach(s=>{ porSlot[s] = filas.filter(r=>r.Slot===s).reduce((s2,r)=>s2+(Number(r.Energia)||0),0); });
+    const total = Object.values(porSlot).reduce((a,b)=>a+b,0);
+    return { fecha, porSlot, total };
+  });
+  const totalSemana = porDia.reduce((s,d)=>s+d.total,0);
+  return { dias: porDia, meta, totalSemana, promedio: totalSemana/7 };
+}
+function svgInformesSemana(datos){
+  const anchoTotal = 320, altoBarras = 140, margenSup = 8;
+  const maxVal = Math.max(datos.meta||0, ...datos.dias.map(d=>d.total), 1);
+  const escala = altoBarras / maxVal;
+  const anchoBarra = 28;
+  const espacio = (anchoTotal - anchoBarra*7) / 8;
+  const hoyISO = hoyLocalISO();
+  let barrasSvg = '';
+  datos.dias.forEach((d,i)=>{
+    const x = espacio + i*(anchoBarra+espacio);
+    let yAcum = margenSup + altoBarras;
+    Object.keys(SLOT_COLORES_INFORME).forEach(slot=>{
+      const val = d.porSlot[slot]||0;
+      if(!val) return;
+      const alto = val*escala;
+      yAcum -= alto;
+      barrasSvg += `<rect x="${x}" y="${yAcum.toFixed(1)}" width="${anchoBarra}" height="${alto.toFixed(1)}" fill="${SLOT_COLORES_INFORME[slot]}" rx="2"/>`;
+    });
+    const nombreDia = fmtFechaCorta(new Date(d.fecha+'T00:00:00')).split(' ')[0].slice(0,2);
+    const esHoy = d.fecha===hoyISO;
+    barrasSvg += `<text x="${x+anchoBarra/2}" y="${margenSup+altoBarras+14}" text-anchor="middle" font-size="9" font-weight="${esHoy?'700':'400'}" fill="var(--text-soft)">${nombreDia}</text>`;
+  });
+  let lineaMeta = '';
+  if(datos.meta){
+    const yMeta = (margenSup + altoBarras - datos.meta*escala).toFixed(1);
+    lineaMeta = `<line x1="0" y1="${yMeta}" x2="${anchoTotal}" y2="${yMeta}" stroke="var(--text-soft)" stroke-width="1" stroke-dasharray="4,3"/>`;
+  }
+  return `<svg viewBox="0 0 ${anchoTotal} ${margenSup+altoBarras+22}" style="width:100%;height:auto;display:block">${lineaMeta}${barrasSvg}</svg>`;
+}
+let informesOffsetSemanas = 0;
+function abrirInformesModal(){
+  informesOffsetSemanas = 0;
+  const html = `
+    <h3>📊 Informes</h3>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <button class="btn ghost" style="padding:6px 10px" onclick="moverInformesSemana(-1)">‹</button>
+      <span class="hint" id="informesRango" style="font-weight:600"></span>
+      <button class="btn ghost" style="padding:6px 10px" onclick="moverInformesSemana(1)">›</button>
+    </div>
+    <div id="informesResumen"></div>
+    <div id="informesChart"></div>
+    <div id="informesLeyenda" style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:8px;font-size:12px"></div>
+    <div class="actions"><button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button></div>`;
+  abrirModal(html);
+  renderInformes();
+}
+function moverInformesSemana(delta){ informesOffsetSemanas += delta; renderInformes(); }
+function renderInformes(){
+  if(!usuarioActivo) return;
+  const lunesHoy = inicioSemana(new Date(hoyLocalISO()+'T00:00:00'));
+  const lunesObjetivo = new Date(lunesHoy); lunesObjetivo.setDate(lunesHoy.getDate()+informesOffsetSemanas*7);
+  const domingoObjetivo = new Date(lunesObjetivo); domingoObjetivo.setDate(lunesObjetivo.getDate()+6);
+  const rangoEl = document.getElementById('informesRango');
+  if(rangoEl) rangoEl.textContent = `${fmtFechaCorta(lunesObjetivo)} – ${fmtFechaCorta(domingoObjetivo)}`;
+  const datos = datosInformesSemana(lunesObjetivo);
+  const resumenEl = document.getElementById('informesResumen');
+  if(resumenEl) resumenEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <div><div class="hint">Total semana</div><div style="font-size:18px;font-weight:700">${Math.round(datos.totalSemana)}</div></div>
+      <div style="text-align:center"><div class="hint">Promedio diario</div><div style="font-size:18px;font-weight:700">${Math.round(datos.promedio)}</div></div>
+      <div style="text-align:right"><div class="hint">Objetivo</div><div style="font-size:18px;font-weight:700">${datos.meta||'—'}</div></div>
+    </div>`;
+  const chartEl = document.getElementById('informesChart');
+  if(chartEl) chartEl.innerHTML = svgInformesSemana(datos);
+  const leyendaEl = document.getElementById('informesLeyenda');
+  if(leyendaEl) leyendaEl.innerHTML = Object.entries(SLOT_COLORES_INFORME).map(([slot,color])=>
+    `<span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:3px;background:${color};display:inline-block"></span>${slot}</span>`
+  ).join('');
+}
+
+// ============================================================
 //  CONFIGURACIÓN
 // ============================================================
 function renderConfig(){
@@ -3450,10 +3553,19 @@ async function guardarEstatura(valor){
 // contra la medición anterior — sin gráfica (no existe ninguna en la app
 // todavía), pero da una idea rápida de la tendencia sin tener que hacer
 // cuentas a mano.
+// Categorías estándar de la OMS por IMC (peso ÷ estatura en metros al
+// cuadrado) — informativo, no un diagnóstico.
+function categoriaIMC(imc){
+  if(imc<18.5) return 'Bajo peso';
+  if(imc<25) return 'Normal';
+  if(imc<30) return 'Sobrepeso';
+  return 'Obesidad';
+}
 function renderCuerpoLista(){
   const cont = document.getElementById('cfgCuerpoLista'); if(!cont || !usuarioActivo) return;
   const mediciones = DATA.cuerpo_log.filter(r=>r.Usuario===usuarioActivo.ID && !esVerdadero(r.Papelera)).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
   if(!mediciones.length){ cont.innerHTML = '<p class="hint">Todavía no has registrado ninguna medición.</p>'; return; }
+  const estaturaM = Number(usuarioActivo.EstaturaCm)/100;
   cont.innerHTML = mediciones.map((m,i)=>{
     const anterior = mediciones[i+1];
     let deltaTxt = '';
@@ -3462,7 +3574,13 @@ function renderCuerpoLista(){
       if(delta) deltaTxt = ` (${delta>0?'+':''}${red1(delta)}kg desde la última vez)`;
     }
     const partes = [];
-    if(m.PesoKg!=='') partes.push(`⚖️ ${red1(m.PesoKg)}kg${deltaTxt}`);
+    if(m.PesoKg!==''){
+      partes.push(`⚖️ ${red1(m.PesoKg)}kg${deltaTxt}`);
+      if(estaturaM>0){
+        const imc = Number(m.PesoKg)/(estaturaM*estaturaM);
+        partes.push(`IMC ${red1(imc)} (${categoriaIMC(imc)})`);
+      }
+    }
     if(m.CinturaCm!=='') partes.push(`📏 cintura ${red1(m.CinturaCm)}cm`);
     if(m.GrasaCorporalPct!=='') partes.push(`grasa corporal ${red1(m.GrasaCorporalPct)}%`);
     if(m.GrasaVisceral!=='') partes.push(`grasa visceral ${red1(m.GrasaVisceral)}`);
