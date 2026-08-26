@@ -277,6 +277,18 @@ nav.tabbar button .ic{font-size:18px}
       </div></div>
 
       <div class="card"><div class="body">
+        <h3>🧍 Estatura</h3>
+        <input type="number" id="cfgEstaturaInput" placeholder="ej. 160" style="width:90px" onchange="guardarEstatura(this.value)"> <span class="hint">cm</span>
+        <p class="hint" style="margin-top:4px">Se usa junto con tu peso para calcular mejor las calorías quemadas al hacer ejercicio.</p>
+      </div></div>
+
+      <div class="card"><div class="body">
+        <h3>⚖️ Peso y composición corporal</h3>
+        <div id="cfgCuerpoLista"></div>
+        <button class="btn secondary" style="margin-top:8px" onclick="abrirRegistrarCuerpo()">+ Registrar medición</button>
+      </div></div>
+
+      <div class="card"><div class="body">
         <h3>🔗 Inventario y lista de compras (Gastos)</h3>
         <p class="hint">Ingredientes y Lista de compras ya NO son propios de Comidas — se leen y escriben en vivo del mismo inventario/lista que ya usas en tu app de Gastos. Elige a qué sesión de Gastos conectar.</p>
         <p class="hint">Sesión vinculada: <b id="cfgGastosSesion">Ninguna todavía</b></p>
@@ -340,7 +352,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Coba';
+const BUILD_VERSION = 'Bacalar2';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -3356,6 +3368,10 @@ function renderConfig(){
   document.getElementById('cfgSheetLink').innerHTML = SHEET_URL ? `<a href="${SHEET_URL}" target="_blank" rel="noopener">📄 Ver / exportar mis datos (Google Sheet)</a>` : '';
   document.getElementById('cfgGastosSesion').textContent = gastosSesion || 'Ninguna todavía';
 
+  const estaturaEl = document.getElementById('cfgEstaturaInput');
+  if(estaturaEl && document.activeElement!==estaturaEl) estaturaEl.value = usuarioActivo.EstaturaCm || '';
+  renderCuerpoLista();
+
   document.getElementById('cfgUsuariosLista').innerHTML = usuariosActivos().map(u=>`
     <div class="userlist-row">
       <span class="nombre">${escAttr(u.Nombre)}${u.ID===usuarioActivo.ID?' (tú)':''} ${u.Password?'🔒':''}</span>
@@ -3377,6 +3393,89 @@ function renderConfig(){
   if(document.activeElement !== ta) ta.value = cfg ? (cfg.Notas||'') : '';
 
   renderPapeleraConfig();
+}
+async function guardarEstatura(valor){
+  const n = Number(valor);
+  usuarioActivo.EstaturaCm = (valor==='' || isNaN(n)) ? '' : n;
+  guardarCacheLocal();
+  await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
+}
+// Lista de mediciones más reciente arriba, con la diferencia de peso
+// contra la medición anterior — sin gráfica (no existe ninguna en la app
+// todavía), pero da una idea rápida de la tendencia sin tener que hacer
+// cuentas a mano.
+function renderCuerpoLista(){
+  const cont = document.getElementById('cfgCuerpoLista'); if(!cont || !usuarioActivo) return;
+  const mediciones = DATA.cuerpo_log.filter(r=>r.Usuario===usuarioActivo.ID && !esVerdadero(r.Papelera)).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)));
+  if(!mediciones.length){ cont.innerHTML = '<p class="hint">Todavía no has registrado ninguna medición.</p>'; return; }
+  cont.innerHTML = mediciones.map((m,i)=>{
+    const anterior = mediciones[i+1];
+    let deltaTxt = '';
+    if(anterior && m.PesoKg!=='' && anterior.PesoKg!==''){
+      const delta = Number(m.PesoKg) - Number(anterior.PesoKg);
+      if(delta) deltaTxt = ` (${delta>0?'+':''}${red1(delta)}kg desde la última vez)`;
+    }
+    const partes = [];
+    if(m.PesoKg!=='') partes.push(`⚖️ ${red1(m.PesoKg)}kg${deltaTxt}`);
+    if(m.CinturaCm!=='') partes.push(`📏 cintura ${red1(m.CinturaCm)}cm`);
+    if(m.GrasaCorporalPct!=='') partes.push(`grasa corporal ${red1(m.GrasaCorporalPct)}%`);
+    if(m.GrasaVisceral!=='') partes.push(`grasa visceral ${red1(m.GrasaVisceral)}`);
+    if(m.MusculoPct!=='') partes.push(`músculo ${red1(m.MusculoPct)}%`);
+    return `<div class="userlist-row">
+      <span class="nombre">${fmtFecha(m.Fecha)}<div class="hint" style="font-weight:400">${partes.join(' · ')||'(sin datos)'}</div></span>
+      <button class="btn ghost" style="font-size:12px;padding:6px 8px" onclick="borrarCuerpoRegistrado('${m.ID}')">🗑</button>
+    </div>`;
+  }).join('');
+}
+function abrirRegistrarCuerpo(){
+  const html = `
+    <h3>⚖️ Registrar medición</h3>
+    <div class="field"><label>Fecha</label><input type="date" id="cuFecha" value="${hoyLocalISO()}"></div>
+    <div style="display:flex;gap:8px">
+      <div class="field" style="flex:1"><label>Peso (kg)</label><input type="number" step="0.1" id="cuPeso" placeholder="ej. 65.5"></div>
+      <div class="field" style="flex:1"><label>Cintura (cm)</label><input type="number" step="0.1" id="cuCintura" placeholder="ej. 80"></div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <div class="field" style="flex:1"><label>% Grasa corporal</label><input type="number" step="0.1" id="cuGrasaCorporal" placeholder="ej. 25"></div>
+      <div class="field" style="flex:1"><label>Grasa visceral</label><input type="number" step="0.1" id="cuGrasaVisceral" placeholder="ej. 7"></div>
+    </div>
+    <div class="field"><label>% Músculo</label><input type="number" step="0.1" id="cuMusculo" placeholder="ej. 30"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="cuGuardarBtn" onclick="guardarCuerpoRegistrado()">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function guardarCuerpoRegistrado(){
+  const btn = document.getElementById('cuGuardarBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try{
+    const num = (id)=>{ const v = parseFloat((document.getElementById(id)||{}).value); return isNaN(v)?'':v; };
+    const row = {
+      ID: uid(), Usuario: usuarioActivo.ID, Fecha: document.getElementById('cuFecha').value || hoyLocalISO(),
+      PesoKg: num('cuPeso'), CinturaCm: num('cuCintura'), GrasaCorporalPct: num('cuGrasaCorporal'),
+      GrasaVisceral: num('cuGrasaVisceral'), MusculoPct: num('cuMusculo'), Papelera: false
+    };
+    const res = await apiPost('saveRow', { table:'CUERPO_LOG', row }, 30000);
+    if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
+    DATA.cuerpo_log.push(row);
+    guardarCacheLocal();
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    showToast('✓ Medición registrada');
+    renderCuerpoLista();
+  }catch(e){
+    console.error('guardarCuerpoRegistrado', e);
+    showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='💾 Guardar'; }
+  }
+}
+async function borrarCuerpoRegistrado(id){
+  const r = DATA.cuerpo_log.find(x=>x.ID===id); if(!r) return;
+  r.Papelera = true;
+  guardarCacheLocal();
+  renderCuerpoLista();
+  await apiPost('saveRow', { table:'CUERPO_LOG', row:r });
 }
 
 function abrirNuevoUsuarioConfig(){
