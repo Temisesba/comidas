@@ -313,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza2';
+const BUILD_VERSION = 'Chichenitza3';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -2875,6 +2875,12 @@ async function guardarComidaRegistrada(){
     const restauranteId = restauranteNombre ? await resolverRestauranteId(restauranteNombre) : '';
     const costoVal = parseFloat((document.getElementById('comidaCosto')||{}).value);
     const costo = isNaN(costoVal) ? '' : costoVal;
+    // Se lee ANTES de guardar/quitar el modal — el checkbox vive dentro del
+    // modal, así que leerlo después de document.querySelectorAll('.modal-
+    // overlay').forEach(o=>o.remove()) más abajo siempre daba undefined
+    // (bug real encontrado probando esto mismo en vivo: nunca mandaba a
+    // Gastos aunque la casilla estuviera marcada).
+    const intentaMandarGastos = costo!=='' && (document.getElementById('comidaMandarGastos')||{}).checked;
     const row = {
       ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: isNaN(horaDate) ? new Date().toISOString() : horaDate.toISOString(),
       Slot: document.getElementById('comidaSlot').value || guessSlotActual(),
@@ -2903,7 +2909,6 @@ async function guardarComidaRegistrada(){
     // El toast de "mandado a Gastos" (éxito o error) ya avisa que la comida
     // se registró — mostrar AMBOS pisaría el mensaje importante con el
     // genérico, así que el genérico solo se muestra si no se intentó mandar.
-    const intentaMandarGastos = costo!=='' && (document.getElementById('comidaMandarGastos')||{}).checked;
     if(intentaMandarGastos) await enviarCostoComidaAGastos(row, restauranteNombre);
     else showToast('✓ Comida registrada');
     window._comidaFotoRecortada = null; window._comidaAnalisis = null; window._comidaDirigido = false; window._comidaRecetaId = '';
