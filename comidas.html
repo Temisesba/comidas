@@ -205,6 +205,24 @@ nav.tabbar button .ic{font-size:18px}
     <div id="screen-comidas" class="screen">
       <h2>🍽️ Comidas</h2>
       <div class="card"><div class="body" id="nutriDashboard"></div></div>
+      <div class="card"><div class="body">
+        <h3>📝 Notas</h3>
+        <p class="hint">Recordatorios rápidos, ej. "divide tus 1300 kcal en 3 comidas de 400 y un snack de 100".</p>
+        <textarea id="notasComidaInput" rows="3" oninput="onNotasComidaInput()" placeholder="Tus notas aquí…"></textarea>
+        <div class="hint" id="notasComidaEstado" style="margin-top:4px"></div>
+      </div></div>
+      <details class="card">
+        <summary style="padding:14px;cursor:pointer;font-weight:600">ℹ️ ¿Cómo se calculan estas metas?</summary>
+        <div class="body" style="padding-top:0">
+          <p class="hint">Todo sale de tu meta diaria de calorías, con reglas fijas de nutrición:</p>
+          <p class="hint">• 1g de proteína = 4 kcal · 1g de carbohidrato = 4 kcal · 1g de grasa = 9 kcal.</p>
+          <p class="hint">• Reparto estándar: 50% de tus kcal en carbohidratos, 20% en proteína, 30% en grasas (de esas, máximo 10% de tus kcal totales como grasa saturada).</p>
+          <p class="hint">• Fibra: 14g por cada 1000 kcal de tu meta.</p>
+          <p class="hint">• Azúcar añadida: máximo 5% de tus kcal (más estricto que el 10% que a veces se permite).</p>
+          <p class="hint">• Sal: tope fijo de salud de 5g al día (2000mg de sodio × 2.5), no depende de tu meta de calorías.</p>
+          <p class="hint">Ejemplo con 1300 kcal: 162.5g carbohidratos, 65g proteína, 43.3g grasas (máx. 14.4g saturada), 18-25g fibra, máx. 16g azúcar, máx. 5g sal.</p>
+        </div>
+      </details>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn" style="flex:1" onclick="abrirRegistrarComidaModal()">📸 Registrar comida</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPanelSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
@@ -317,7 +335,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Palenque';
+const BUILD_VERSION = 'Uxmal';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -676,6 +694,7 @@ function renderAllScreens(){
 }
 function renderComidas(){
   renderNutriDashboard();
+  renderNotasComida();
   renderCalendario();
 }
 function switchTab(name){
@@ -1154,12 +1173,20 @@ function renderInicioHoy(){
     // resumen de "faltan X de lo planeado" (todo, realizado + pendiente)
     // se muestra aparte, debajo de "Hoy".
     const { meta, consumido, quemado, restante } = caloriasRealizadasParaFecha(hoyISO);
+    const macrosHoy = macrosRealizadosParaFecha(hoyISO);
+    const metas = metasMacrosDiarias(meta);
+    const filasMacros = [
+      ['Grasas','Grasas'], ['GrasasSaturadas','Grasas saturadas'], ['Carbohidratos','Carbohidratos'],
+      ['Azucares','Azúcares'], ['Fibra','Fibra'], ['Proteina','Proteína'], ['Sal','Sal']
+    ].map(([campo,etiqueta])=>filaMacroDashboard(etiqueta, macrosHoy[campo]||0, metas?metas[campo]:0)).join('');
     cal.innerHTML = `<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
       <div><div class="hint">Meta diaria</div><div style="font-size:18px;font-weight:700">${meta||'—'}</div></div>
       <div style="text-align:center"><div class="hint">Llevas hoy</div><div style="font-size:18px;font-weight:700">${Math.round(consumido)}</div></div>
       <div style="text-align:center"><div class="hint">Te quedan</div><div style="font-size:18px;font-weight:700;color:${meta&&restante<0?'var(--danger)':'inherit'}">${meta?Math.round(restante):'—'}</div></div>
     </div>
-    ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas</p>`:''}`;
+    ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas</p>`:''}
+    ${meta?`<button class="btn ghost" style="margin-top:8px;font-size:13px;padding:6px 10px" onclick="toggleMacrosInicio()">${mostrarMacrosInicio?'▴ Ocultar detalle de macros':'▾ Ver detalle de macros'}</button>`:''}
+    ${mostrarMacrosInicio?`<div style="margin-top:8px">${filasMacros}</div>`:''}`;
   }
   const cont = document.getElementById('inicioComidasHoy'); if(!cont) return;
   const registros = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
@@ -2621,6 +2648,45 @@ function caloriasRealizadasParaFecha(fecha){
   return { meta, consumido, quemado, restante: meta - consumido + quemado };
 }
 function caloriasRealizadasHoy(){ return caloriasRealizadasParaFecha(hoyLocalISO()); }
+// Reparto estándar de macros a partir de la meta de calorías — mismas
+// reglas explicadas en el bloque "¿Cómo se calculan?" de la pantalla:
+// 1g proteína/carb = 4 kcal, 1g grasa = 9 kcal; 50% carbos/20% proteína/
+// 30% grasas (máx 10% saturada); fibra 14g por cada 1000 kcal; azúcar
+// añadida máx 5% de las kcal; sal es un tope de salud fijo, no depende
+// de las kcal.
+function metasMacrosDiarias(meta){
+  meta = Number(meta)||0;
+  if(!meta) return null;
+  return {
+    Energia: meta,
+    Carbohidratos: (meta*0.50)/4,
+    Proteina: (meta*0.20)/4,
+    Grasas: (meta*0.30)/9,
+    GrasasSaturadas: (meta*0.10)/9,
+    Fibra: (meta/1000)*14,
+    Azucares: (meta*0.05)/4,
+    Sal: 5
+  };
+}
+function macrosRealizadosParaFecha(fecha){
+  const campos = ['Energia','Grasas','GrasasSaturadas','Carbohidratos','Azucares','Fibra','Proteina','Sal'];
+  const filas = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera) && esVerdadero(r.Realizado));
+  const out = {};
+  campos.forEach(c=>{ out[c] = filas.reduce((s,r)=>s+(Number(r[c])||0),0); });
+  return out;
+}
+let mostrarMacrosDashboard = false;
+function toggleMacrosDashboard(){ mostrarMacrosDashboard = !mostrarMacrosDashboard; renderNutriDashboard(); }
+let mostrarMacrosInicio = false;
+function toggleMacrosInicio(){ mostrarMacrosInicio = !mostrarMacrosInicio; renderInicioHoy(); }
+function filaMacroDashboard(etiqueta, consumido, meta){
+  if(!meta) return `<div class="inv-item"><div class="info"><div class="nombre">${etiqueta}</div><div class="meta">${red1(consumido)}g consumidos hoy</div></div></div>`;
+  const restante = meta - consumido;
+  const excedido = restante < 0;
+  return `<div class="inv-item"><div class="info"><div class="nombre">${etiqueta}</div>
+    <div class="meta">${red1(consumido)} / ${red1(meta)}g · ${excedido?'⚠️ pasado por '+red1(-restante)+'g':'faltan '+red1(restante)+'g'}</div>
+  </div></div>`;
+}
 function renderNutriDashboard(){
   if(!usuarioActivo) return;
   const cont = document.getElementById('nutriDashboard'); if(!cont) return;
@@ -2628,6 +2694,12 @@ function renderNutriDashboard(){
   // lo planeado a futuro — para eso está el resumen "faltan X de lo
   // planeado" que se ve más abajo, en el calendario y en Inicio.
   const { meta, consumido, quemado, restante } = caloriasRealizadasHoy();
+  const macrosHoy = macrosRealizadosParaFecha(hoyLocalISO());
+  const metas = metasMacrosDiarias(meta);
+  const filasMacros = [
+    ['Grasas','Grasas'], ['GrasasSaturadas','Grasas saturadas'], ['Carbohidratos','Carbohidratos'],
+    ['Azucares','Azúcares'], ['Fibra','Fibra'], ['Proteina','Proteína'], ['Sal','Sal']
+  ].map(([campo,etiqueta])=>filaMacroDashboard(etiqueta, macrosHoy[campo]||0, metas?metas[campo]:0)).join('');
   cont.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:8px;flex-wrap:wrap">
       <div><div class="hint">Meta diaria</div>
@@ -2638,6 +2710,8 @@ function renderNutriDashboard(){
     </div>
     ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas a "Te quedan"</p>`:''}
     ${meta?'':'<p class="hint" style="margin-top:8px">Pon tu meta diaria de calorías para empezar — lo que vayas registrando aparece abajo, por día y por Desayuno/Comida/Cena/Snack.</p>'}
+    ${meta?`<button class="btn ghost" style="margin-top:8px;font-size:13px;padding:6px 10px" onclick="toggleMacrosDashboard()">${mostrarMacrosDashboard?'▴ Ocultar detalle de macros':'▾ Ver detalle de macros (grasas, carbos, fibra…)'}</button>`:''}
+    ${mostrarMacrosDashboard?`<div style="margin-top:8px">${filasMacros}</div>`:''}
   `;
 }
 async function guardarMetaCalorias(valor){
@@ -2646,6 +2720,35 @@ async function guardarMetaCalorias(valor){
   guardarCacheLocal();
   renderNutriDashboard();
   await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
+}
+// Notas personales de la pestaña Comidas — distintas de las de
+// Configuración (esas son un blob general, sin relación con comida).
+// Mismo patrón de autoguardado con debounce que ya usa Configuración.
+let notasComidaGuardarTimer = null;
+function onNotasComidaInput(){
+  const estado = document.getElementById('notasComidaEstado');
+  if(estado) estado.textContent = 'Escribiendo…';
+  clearTimeout(notasComidaGuardarTimer);
+  notasComidaGuardarTimer = setTimeout(guardarNotasComida, 800);
+}
+async function guardarNotasComida(){
+  const ta = document.getElementById('notasComidaInput'); if(!ta) return;
+  usuarioActivo.NotasComida = ta.value;
+  guardarCacheLocal();
+  const estado = document.getElementById('notasComidaEstado');
+  if(estado) estado.textContent = 'Guardando…';
+  const r = await apiPost('saveRow', { table:'USUARIOS', row:usuarioActivo });
+  if(!estado) return;
+  estado.textContent = r.ok ? 'Guardado ✓' : '⚠️ No se pudo guardar (sin conexión)';
+  if(r.ok) setTimeout(()=>{ if(estado.textContent==='Guardado ✓') estado.textContent=''; }, 2000);
+}
+// No pisa el textarea si está enfocado (escribiendo) — renderComidas()
+// se llama después de cada guardado de comida, no solo al entrar a la
+// pestaña, así que sin este resguardo podría borrar lo que se está
+// escribiendo a media escritura.
+function renderNotasComida(){
+  const ta = document.getElementById('notasComidaInput'); if(!ta || !usuarioActivo) return;
+  if(document.activeElement !== ta) ta.value = usuarioActivo.NotasComida || '';
 }
 async function borrarRegistroComida(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
