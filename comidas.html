@@ -190,6 +190,10 @@ nav.tabbar button .ic{font-size:18px}
       <h2>🏠 Inicio</h2>
       <div class="card"><div class="body" id="inicioCalorias"></div></div>
       <div id="inicioComidasHoy"></div>
+      <div style="margin:14px 0">
+        <button class="btn ghost block" onclick="abrirPanelSugerenciaComidaIA('inicioSugerencia')">💡 Sugerencias de comida (IA)</button>
+        <div id="inicioSugerencia"></div>
+      </div>
       <div id="inicioCaducar"></div>
       <div id="inicioQueCocino"></div>
       <div style="margin-top:18px">
@@ -313,7 +317,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza4';
+const BUILD_VERSION = 'Chichenitza5';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -2926,21 +2930,29 @@ async function guardarComidaRegistrada(){
 // "solo qué cenar hoy según mis kcal disponibles") y para qué día, y que la
 // IA decida sola si eso es una sola comida o el día completo — el backend
 // siempre regresa una LISTA (de 1 a 4), cada una con su slot.
-function abrirPanelSugerenciaComidaIA(){
-  const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
+// contId: dónde vive el panel — 'nutriSugerencia' en la pestaña Comidas,
+// 'inicioSugerencia' en Inicio (mismo botón/función, pedido explícito de
+// tenerlo en las dos pantallas). Los campos internos se buscan por clase
+// DENTRO de ese contenedor (no por id global), porque los dos paneles
+// existen a la vez en el DOM (uno oculto por la pestaña, no removido) y un
+// id repetido en los dos rompería cuál lee cuál.
+function abrirPanelSugerenciaComidaIA(contId){
+  contId = contId || 'nutriSugerencia';
+  const cont = document.getElementById(contId); if(!cont) return;
   cont.innerHTML = `<div class="card"><div class="body">
-    <div class="field"><label>¿Para qué día?</label><input type="date" id="sugFecha" value="${hoyLocalISO()}"></div>
+    <div class="field"><label>¿Para qué día?</label><input type="date" class="sug-fecha" value="${hoyLocalISO()}"></div>
     <div class="field"><label>¿Qué necesitas? (opcional — vacío = una sugerencia rápida para ahora)</label>
-      <textarea id="sugTexto" rows="2" placeholder="ej: dame toda la recomendación para mañana (desayuno, comida y cena) — o — solo sugiéreme qué cenar hoy"></textarea>
+      <textarea class="sug-texto" rows="2" placeholder="ej: dame toda la recomendación para mañana (desayuno, comida y cena) — o — solo sugiéreme qué cenar hoy"></textarea>
     </div>
-    <button class="btn" id="sugPedirBtn" onclick="pedirSugerenciaComidaIA()">🤖 Pedir sugerencia</button>
+    <button class="btn sug-btn" onclick="pedirSugerenciaComidaIA('${contId}')">🤖 Pedir sugerencia</button>
   </div></div>`;
 }
-async function pedirSugerenciaComidaIA(){
-  const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
-  const fecha = (document.getElementById('sugFecha')||{}).value || hoyLocalISO();
-  const instruccion = (document.getElementById('sugTexto')||{}).value.trim() || '';
-  const btn = document.getElementById('sugPedirBtn');
+async function pedirSugerenciaComidaIA(contId){
+  contId = contId || 'nutriSugerencia';
+  const cont = document.getElementById(contId); if(!cont) return;
+  const fecha = (cont.querySelector('.sug-fecha')||{}).value || hoyLocalISO();
+  const instruccion = ((cont.querySelector('.sug-texto')||{}).value||'').trim();
+  const btn = cont.querySelector('.sug-btn');
   if(btn){ btn.disabled = true; btn.textContent = '🤖 Pensando…'; }
   try{
     const { meta, restante } = caloriasRestantesParaFecha(fecha);
@@ -2961,7 +2973,7 @@ async function pedirSugerenciaComidaIA(){
           <button class="btn" onclick="usarSugerenciaComida(${i},'${fecha}')">👍 Usar esta</button>
           ${s.origen==='receta_existente' && s.recetaId ? `<button class="btn ghost" onclick="abrirRecetaDetalle('${s.recetaId}')">🍽 Ver receta</button>` : ''}
         </div>
-      </div>`).join('') + `<button class="btn ghost" style="margin-top:6px" onclick="abrirPanelSugerenciaComidaIA()">🔄 Pedir otra cosa</button>`;
+      </div>`).join('') + `<button class="btn ghost" style="margin-top:6px" onclick="abrirPanelSugerenciaComidaIA('${contId}')">🔄 Pedir otra cosa</button>`;
   }catch(e){
     console.error('pedirSugerenciaComidaIA', e);
     showToast('Error inesperado al sugerir: '+(e&&e.message?e.message:e));
