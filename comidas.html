@@ -190,6 +190,7 @@ nav.tabbar button .ic{font-size:18px}
       <h2>🏠 Inicio</h2>
       <div class="card"><div class="body" id="inicioCalorias"></div></div>
       <div id="inicioComidasHoy"></div>
+      <div class="card"><div class="body" id="inicioActividadHoy"></div></div>
       <div style="margin:14px 0">
         <button class="btn ghost block" onclick="abrirPanelSugerenciaComidaIA('inicioSugerencia')">💡 Sugerencias de comida (IA)</button>
         <div id="inicioSugerencia"></div>
@@ -225,9 +226,13 @@ nav.tabbar button .ic{font-size:18px}
       </details>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn" style="flex:1" onclick="abrirRegistrarComidaModal()">📸 Registrar comida</button>
+        <button class="btn ghost" style="flex:1" onclick="abrirRegistrarEjercicioModal()">🏃 Registrar ejercicio</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn ghost" style="flex:1" onclick="abrirPanelSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
+      <div class="card"><div class="body" id="comidaActividadHoy"></div></div>
       <div id="nutriSugerencia"></div>
       <div id="calendarioLista"></div>
     </div>
@@ -335,8 +340,8 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Uxmal';
-let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[] };
+const BUILD_VERSION = 'Coba';
+let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
 // Comidas — esta es la sesión de Gastos elegida (una por dispositivo, mismo
@@ -516,7 +521,7 @@ function normalizeData(d){
     recetas_historial: d.recetas_historial||[], inventario: d.inventario||[],
     precios: d.precios||[], lista_compras: d.lista_compras||[], calendario: d.calendario||[],
     nutricion_log: d.nutricion_log||[], config: d.config||[], restaurantes: d.restaurantes||[],
-    ejercicio_log: d.ejercicio_log||[], cuerpo_log: d.cuerpo_log||[]
+    ejercicio_log: d.ejercicio_log||[], cuerpo_log: d.cuerpo_log||[], agua_log: d.agua_log||[]
   };
 }
 // La copia local es solo para ver algo mientras no hay internet — el dato
@@ -573,6 +578,7 @@ function datosParaCacheLocal(){
     nutricion_log: DATA.nutricion_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
     calendario: DATA.calendario.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
     ejercicio_log: DATA.ejercicio_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
+    agua_log: DATA.agua_log.filter(r=>fechaDentroDeRango(r.Fecha, CACHE_DIAS_HISTORIAL)),
     cuerpo_log: DATA.cuerpo_log.slice(-100),
     recetas_historial: DATA.recetas_historial.slice(-300),
     precios: DATA.precios.slice(-500)
@@ -586,7 +592,7 @@ async function guardarCacheLocal(){
     // solo lo esencial para poder abrir la app sin internet — el historial
     // se vuelve a traer solo del Sheet en cuanto haya conexión.
     try{
-      const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[], ejercicio_log:[], cuerpo_log:[] });
+      const minimo = Object.assign({}, DATA, { nutricion_log:[], calendario:[], recetas_historial:[], precios:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] });
       await idbSet(IDB_KEY_DATA, minimo);
     }catch(e2){ console.warn('Tampoco cupo la copia mínima local:', e2); }
   }
@@ -695,6 +701,7 @@ function renderAllScreens(){
 function renderComidas(){
   renderNutriDashboard();
   renderNotasComida();
+  renderActividadHoy('comidaActividadHoy');
   renderCalendario();
 }
 function switchTab(name){
@@ -1229,6 +1236,7 @@ function renderInicioHoy(){
     const filaAgregar = `<div class="slot-row vacio" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-nombre">${primero?(SLOT_ICONOS[slot]+' '+slot):''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'Nada todavía — toca para agregar'}</span></div>`;
     return filasCalendario + filasRegistros + filaAgregar;
   }).join('') + `</div>`;
+  renderActividadHoy('inicioActividadHoy');
 }
 async function pedirIdeaIA(){
   if(!gastosSesion){ showToast('Vincula tu sesión de Gastos en Configuración primero'); return; }
@@ -3197,6 +3205,145 @@ function usarSugerenciaComida(i, fecha){
   const el = document.getElementById('comidaTexto');
   if(el) el.value = s.nombre || '';
   if(s.origen==='receta_existente' && s.recetaId) window._comidaRecetaId = s.recetaId;
+}
+
+// ============================================================
+//  Ejercicio y agua — mismo bloque "Actividad de hoy", visible tanto en
+//  Comidas como en Inicio (dos contenedores distintos, mismo render).
+// ============================================================
+const TIPOS_EJERCICIO = ['Caminar','Correr','Ciclismo','Nadar','Pesas/Musculación','Yoga','HIIT','Otro'];
+function renderActividadHoy(contId){
+  const cont = document.getElementById(contId); if(!cont || !usuarioActivo) return;
+  const hoyISO = hoyLocalISO();
+  const ejercicios = DATA.ejercicio_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
+  const totalQuemado = ejercicios.reduce((s,r)=>s+(Number(r.CaloriasQuemadas)||0),0);
+  const totalPasos = ejercicios.reduce((s,r)=>s+(Number(r.Pasos)||0),0);
+  const aguaRow = DATA.agua_log.find(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
+  const vasos = aguaRow ? (Number(aguaRow.Vasos)||0) : 0;
+  const filasEjercicio = ejercicios.map(r=>`
+    <div class="slot-row" onclick="abrirAccionesEjercicio('${r.ID}')"><span class="slot-nombre">🏃</span><span class="slot-contenido">${escAttr(r.Tipo||'Ejercicio')}${r.Detalle?' · '+escAttr(r.Detalle):''} · ${Math.round(r.CaloriasQuemadas||0)} kcal${r.Pasos?' · '+Number(r.Pasos).toLocaleString('es-MX')+' pasos':''}</span></div>
+  `).join('');
+  cont.innerHTML = `
+    <h3>🏃 Actividad de hoy</h3>
+    ${totalQuemado?`<p class="hint">Quemaste ${Math.round(totalQuemado)} kcal${totalPasos?' · 🚶 '+totalPasos.toLocaleString('es-MX')+' pasos':''} hoy</p>`:''}
+    ${filasEjercicio || '<p class="hint">Nada de ejercicio registrado todavía.</p>'}
+    <button class="btn ghost" style="margin-top:8px;width:100%" onclick="abrirRegistrarEjercicioModal('${hoyISO}')">+ Agregar ejercicio</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+      <div><div class="hint">💧 Agua hoy</div><div style="font-size:20px;font-weight:700">${vasos} <span class="hint" style="font-size:13px;font-weight:400">vasos</span></div></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" style="padding:8px 16px" onclick="ajustarAgua(-1)" ${vasos<=0?'disabled':''}>−</button>
+        <button class="btn" style="padding:8px 16px" onclick="ajustarAgua(1)">+</button>
+      </div>
+    </div>`;
+}
+async function ajustarAgua(delta){
+  if(!usuarioActivo) return;
+  const hoyISO = hoyLocalISO();
+  let row = DATA.agua_log.find(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera));
+  if(!row){ row = { ID: uid(), Usuario: usuarioActivo.ID, Fecha: hoyISO, Vasos: 0, Papelera: false }; DATA.agua_log.push(row); }
+  row.Vasos = Math.max(0, (Number(row.Vasos)||0) + delta);
+  guardarCacheLocal();
+  renderComidas(); renderInicioHoy();
+  await apiPost('saveRow', { table:'AGUA_LOG', row });
+}
+// fechaFija: cuando se llega desde "+ Agregar ejercicio" de un día
+// concreto (hoy, casi siempre); el peso más reciente de CUERPO_LOG (si ya
+// hay alguno capturado) se manda junto con la estatura para que la IA
+// calcule mejor las calorías quemadas.
+function abrirRegistrarEjercicioModal(fechaFija){
+  const fecha = fechaFija || hoyLocalISO();
+  window._ejercicioAnalisis = null;
+  const html = `
+    <h3>🏃 Registrar ejercicio</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="field" style="flex:1;min-width:130px"><label>Fecha</label><input type="date" id="ejFecha" value="${escAttr(fecha)}"></div>
+      <div class="field" style="flex:0 0 100px"><label>Hora</label><input type="time" id="ejHora" value="${horaActualHHMM()}"></div>
+    </div>
+    <div class="field"><label>Tipo</label><select id="ejTipo">${TIPOS_EJERCICIO.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+    <div class="field"><label>Detalle</label><input type="text" id="ejDetalle" placeholder="ej. trote 15 min, o caminé 8 mil pasos"></div>
+    <div class="field"><label>Pasos (opcional)</label><input type="number" id="ejPasos" placeholder="ej. 8000"></div>
+    <div class="actions" style="justify-content:flex-start">
+      <button class="btn secondary" id="ejCalcularBtn" onclick="calcularCaloriasEjercicio()">🤖 Calcular calorías quemadas</button>
+    </div>
+    <div class="field"><label>Calorías quemadas (kcal)</label><input type="number" id="ejCalorias" value="0"></div>
+    <div class="actions">
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+      <button class="btn" id="ejGuardarBtn" onclick="guardarEjercicioRegistrado()">💾 Guardar</button>
+    </div>`;
+  abrirModal(html, {confirmarCierre:true});
+}
+async function calcularCaloriasEjercicio(){
+  const btn = document.getElementById('ejCalcularBtn');
+  const tipo = document.getElementById('ejTipo').value;
+  const detalle = document.getElementById('ejDetalle').value.trim();
+  const pasos = document.getElementById('ejPasos').value;
+  if(!detalle && !pasos){ showToast('Escribe algún detalle (duración, distancia) o pasos'); return; }
+  if(btn){ btn.disabled = true; btn.textContent = '🤖 Calculando…'; }
+  try{
+    const detalleCompleto = detalle + (pasos?((detalle?' — ':'')+pasos+' pasos'):'');
+    const pesoReciente = DATA.cuerpo_log.filter(c=>c.Usuario===usuarioActivo.ID && !esVerdadero(c.Papelera)).sort((a,b)=>String(b.Fecha).localeCompare(String(a.Fecha)))[0];
+    const r = await apiPost('estimarEjercicioConIA', {
+      tipo, detalle: detalleCompleto,
+      pesoKg: (pesoReciente && pesoReciente.PesoKg) || '',
+      estaturaCm: usuarioActivo.EstaturaCm || ''
+    }, 45000);
+    if(!r.ok){ showToast('No se pudo calcular: '+(r.error||'sin conexión')); return; }
+    const el = document.getElementById('ejCalorias'); if(el) el.value = Math.round(r.caloriasQuemadas);
+    window._ejercicioAnalisis = r;
+    if(r.nota) showToast('🤖 '+r.nota);
+  }catch(e){
+    console.error('calcularCaloriasEjercicio', e);
+    showToast('Error inesperado: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🤖 Calcular calorías quemadas'; }
+  }
+}
+async function guardarEjercicioRegistrado(){
+  const btn = document.getElementById('ejGuardarBtn');
+  if(btn){ btn.disabled=true; btn.textContent='Guardando…'; }
+  try{
+    const fechaVal = document.getElementById('ejFecha').value || hoyLocalISO();
+    const horaVal = document.getElementById('ejHora').value || horaActualHHMM();
+    const horaDate = new Date(fechaVal+'T'+horaVal+':00');
+    const row = {
+      ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: isNaN(horaDate)?new Date().toISOString():horaDate.toISOString(),
+      Tipo: document.getElementById('ejTipo').value, Detalle: document.getElementById('ejDetalle').value.trim(),
+      CaloriasQuemadas: Number(document.getElementById('ejCalorias').value)||0,
+      Pasos: Number(document.getElementById('ejPasos').value)||'',
+      Modelo: (window._ejercicioAnalisis&&window._ejercicioAnalisis.modelo)||'', Papelera:false
+    };
+    const res = await apiPost('saveRow', { table:'EJERCICIO_LOG', row }, 30000);
+    if(!res.ok){ showToast('No se pudo guardar: '+(res.error||'sin conexión')); return; }
+    DATA.ejercicio_log.push(row);
+    guardarCacheLocal();
+    document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
+    showToast('✓ Ejercicio registrado');
+    renderComidas(); renderInicioHoy();
+  }catch(e){
+    console.error('guardarEjercicioRegistrado', e);
+    showToast('Error inesperado al guardar: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='💾 Guardar'; }
+  }
+}
+function abrirAccionesEjercicio(id){
+  const r = DATA.ejercicio_log.find(x=>x.ID===id); if(!r) return;
+  const html = `
+    <h3>🏃 ${escAttr(r.Tipo||'Ejercicio')} — ${fmtFecha(r.Fecha)}${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</h3>
+    ${r.Detalle?`<p>${escAttr(r.Detalle)}</p>`:''}
+    <p class="hint">${Math.round(r.CaloriasQuemadas||0)} kcal quemadas${r.Pasos?' · '+Number(r.Pasos).toLocaleString('es-MX')+' pasos':''}</p>
+    <div class="actions" style="justify-content:flex-start">
+      <button class="btn danger" onclick="cerrarModalYAbrir(()=>borrarEjercicioRegistrado('${r.ID}'))">🗑 Quitar</button>
+      <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cerrar</button>
+    </div>`;
+  abrirModal(html);
+}
+async function borrarEjercicioRegistrado(id){
+  const r = DATA.ejercicio_log.find(x=>x.ID===id); if(!r) return;
+  r.Papelera = true;
+  guardarCacheLocal();
+  renderComidas(); renderInicioHoy();
+  await apiPost('saveRow', { table:'EJERCICIO_LOG', row:r });
 }
 
 // ============================================================
