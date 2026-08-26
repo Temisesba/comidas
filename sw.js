@@ -2,7 +2,7 @@
 // Mismo patrón que ropa/sw.js: cache:'no-store' en el documento principal
 // para que la app instalada nunca se quede viendo una copia vieja (ver
 // memoria bug_pattern_pwa_cache_first_stale).
-const CACHE_NAME = 'comidas-shell-v1';
+const CACHE_NAME = 'comidas-shell-v2';
 const SHELL_FILE = 'comidas.html';
 
 self.addEventListener('install', () => { self.skipWaiting(); });

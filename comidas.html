@@ -313,8 +313,8 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza';
-let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[] };
+const BUILD_VERSION = 'Chichenitza2';
+let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
 // Comidas — esta es la sesión de Gastos elegida (una por dispositivo, mismo
@@ -490,7 +490,7 @@ function normalizeData(d){
     usuarios: d.usuarios||[], categorias: d.categorias||[], recetas: d.recetas||[],
     recetas_historial: d.recetas_historial||[], inventario: d.inventario||[],
     precios: d.precios||[], lista_compras: d.lista_compras||[], calendario: d.calendario||[],
-    nutricion_log: d.nutricion_log||[], config: d.config||[]
+    nutricion_log: d.nutricion_log||[], config: d.config||[], restaurantes: d.restaurantes||[]
   };
 }
 // La copia local es solo para ver algo mientras no hay internet — el dato
@@ -2638,7 +2638,7 @@ function guessSlotActual(){
 // todos aquí desde el principio — Analizar solo RELLENA los campos de
 // abajo sin cambiar de pantalla, y Guardar funciona con o sin haber
 // corrido la IA (llenar todo a mano también es válido).
-function abrirRegistrarComidaModal(fechaFija, slotFijo){
+function abrirRegistrarComidaModal(fechaFija, slotFijo, restauranteFijo){
   window._comidaFotoRecortada = null;
   window._comidaAnalisis = null;
   window._comidaNuevaEstrellas = 0;
@@ -2684,6 +2684,16 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo){
       ${NUTRI_CAMPOS.map(([campo,key,unidad])=>`<div class="field" style="margin:0"><label>${NUTRI_ETIQUETAS[campo]} (${unidad})</label><input type="number" step="0.1" id="comidaCampo_${campo}" value="0" ${campo==='Energia'?'oninput="actualizarVeredictoComida()"':''}></div>`).join('')}
     </div>
     <div class="field"><label>Calificación (opcional)</label><div id="comidaEstrellas"></div></div>
+    <div class="field"><label>Restaurante (opcional)</label>
+      <input type="text" id="comidaRestaurante" list="comidaRestaurantesList" placeholder="¿En qué restaurante?" value="${escAttr(restauranteFijo||'')}">
+      <datalist id="comidaRestaurantesList">${activos(DATA.restaurantes).map(r=>`<option value="${escAttr(r.Nombre)}">`).join('')}</datalist>
+    </div>
+    <div class="field"><label>Costo (opcional)</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input type="number" step="0.01" id="comidaCosto" placeholder="0.00" style="flex:1">
+        <label class="hint" style="display:flex;gap:4px;align-items:center;white-space:nowrap"><input type="checkbox" id="comidaMandarGastos" style="width:auto"> también a Gastos</label>
+      </div>
+    </div>
     <div class="field"><label>Notas (opcional)</label><textarea id="comidaNotas" rows="2" placeholder="cómo te supo, cómo te sentiste…"></textarea></div>
     <div class="actions">
       <button class="btn ghost" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
@@ -2788,6 +2798,44 @@ function actualizarVeredictoComida(){
   if(despues >= 0){ el.textContent = `✅ Cabe — te quedarían ${Math.round(despues)} kcal después de esto.`; el.style.color = 'var(--success)'; }
   else { el.textContent = `⚠️ Te pasarías por ${Math.round(-despues)} kcal si comes esto.`; el.style.color = 'var(--danger)'; }
 }
+// Fase D: catálogo de restaurantes vinculado — busca por nombre (sin
+// distinguir mayúsculas) antes de crear, para que "Sushi Ken" e Itinerario
+// mandando el mismo nombre otra vez no dupliquen la fila.
+async function resolverRestauranteId(nombre){
+  if(!nombre) return '';
+  const existente = activos(DATA.restaurantes).find(r=>(r.Nombre||'').toLowerCase()===nombre.toLowerCase());
+  if(existente) return existente.ID;
+  const row = { ID: uid(), Nombre: nombre, Direccion:'', Papelera:false };
+  try{
+    const res = await apiPost('saveRow', { table:'RESTAURANTES', row }, 15000);
+    if(res.ok){ DATA.restaurantes.push(row); return row.ID; }
+  } catch(e){ /* si falla, la comida se guarda igual, solo sin vínculo */ }
+  return '';
+}
+// Fase D: manda el costo de la comida a Gastos — SOLO si Temis marcó la
+// casilla, nunca automático. Reusa las mismas llaves de localStorage que ya
+// comparten App_Completa/Ropa/Itinerario en este mismo origen
+// (temisesba.github.io) para la URL y sesión de Gastos, así que no hace
+// falta pedirle a Temis que las configure otra vez aquí.
+async function enviarCostoComidaAGastos(row, restauranteNombre){
+  try{
+    const conexiones = JSON.parse(localStorage.getItem('ac_conexiones')||'{}');
+    const gastosUrl = conexiones.gastos;
+    const sesion = localStorage.getItem('ac_gastos_sesion') || '';
+    if(!gastosUrl || !sesion){ showToast('Falta conectar Gastos (desde App Completa → Configuración) para mandar el costo'); return; }
+    const f = new FormData();
+    f.append('payload', JSON.stringify({
+      action:'saveGasto', sesion,
+      fecha: row.Fecha, costo: row.Costo,
+      concepto: row.Descripcion + (restauranteNombre?(' — '+restauranteNombre):''),
+      categoria:'🍽️ Restaurantes, cafés y delivery', notas:'Registrado desde Comidas'
+    }));
+    const res = await fetch(gastosUrl, { method:'POST', body:f });
+    const data = await res.json();
+    if(data && data.error) throw new Error(data.error);
+    showToast('✓ Comida registrada y costo enviado a Gastos');
+  } catch(e){ showToast('Comida registrada, pero no se pudo mandar a Gastos: '+e.message); }
+}
 async function guardarComidaRegistrada(){
   const btn = document.getElementById('comidaGuardarBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
@@ -2820,6 +2868,13 @@ async function guardarComidaRegistrada(){
     const fechaVal = document.getElementById('comidaFecha').value || hoyLocalISO();
     const horaVal = (document.getElementById('comidaHora')||{}).value || horaActualHHMM();
     const horaDate = new Date(fechaVal+'T'+horaVal+':00');
+    // Fase D: restaurante (catálogo vinculado, no solo texto libre — pedido
+    // explícito) + costo opcional que, si se marca la casilla, también se
+    // manda a Gastos (nunca automático).
+    const restauranteNombre = (document.getElementById('comidaRestaurante')||{}).value?.trim() || '';
+    const restauranteId = restauranteNombre ? await resolverRestauranteId(restauranteNombre) : '';
+    const costoVal = parseFloat((document.getElementById('comidaCosto')||{}).value);
+    const costo = isNaN(costoVal) ? '' : costoVal;
     const row = {
       ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: isNaN(horaDate) ? new Date().toISOString() : horaDate.toISOString(),
       Slot: document.getElementById('comidaSlot').value || guessSlotActual(),
@@ -2829,7 +2884,8 @@ async function guardarComidaRegistrada(){
       Proteina: valores.Proteina, Sal: valores.Sal, Modelo: (analisis && analisis.modelo) || '', Papelera: false,
       Estrellas: window._comidaNuevaEstrellas || '',
       Notas: (document.getElementById('comidaNotas')||{}).value || '',
-      RecetaID: recetaId || ''
+      RecetaID: recetaId || '',
+      RestauranteID: restauranteId || '', Costo: costo
     };
     const res = await apiPost('saveRow', { table:'NUTRICION_LOG', row }, 30000);
     if(!res.ok){
@@ -2844,7 +2900,12 @@ async function guardarComidaRegistrada(){
     // hace falta la fila aparte para nada — un solo renglón por comida.
     guardarCacheLocal();
     document.querySelectorAll('.modal-overlay').forEach(o=>o.remove());
-    showToast('✓ Comida registrada');
+    // El toast de "mandado a Gastos" (éxito o error) ya avisa que la comida
+    // se registró — mostrar AMBOS pisaría el mensaje importante con el
+    // genérico, así que el genérico solo se muestra si no se intentó mandar.
+    const intentaMandarGastos = costo!=='' && (document.getElementById('comidaMandarGastos')||{}).checked;
+    if(intentaMandarGastos) await enviarCostoComidaAGastos(row, restauranteNombre);
+    else showToast('✓ Comida registrada');
     window._comidaFotoRecortada = null; window._comidaAnalisis = null; window._comidaDirigido = false; window._comidaRecetaId = '';
     renderComidas(); renderInicioHoy(); renderCalendario();
   }catch(e){
@@ -3073,11 +3134,20 @@ function borrarParaSiempre(tabla, id){
 // ============================================================
 boot();
 
-// Deep link desde App Completa: abre directo "Registrar comida".
+// Deep link desde App Completa (o desde Itinerario, Fase D): abre directo
+// "Registrar comida". Itinerario manda además "?restaurante=...&fecha=..."
+// (nombre del pendiente marcado como restaurante + la fecha de ese día) para
+// precargar el modal — mismo hash base que ya usaba App Completa, solo se le
+// agregó el query-string opcional, así que el deep-link de App Completa
+// (sin esos parámetros) sigue funcionando exactamente igual que antes.
 // setTimeout le da tiempo a boot() antes de abrir el modal encima.
 window.addEventListener('load', () => {
-  if (location.hash === '#nueva-comida') {
-    setTimeout(() => { try { switchTab('comidas'); abrirRegistrarComidaModal(); } catch (e) {} }, 400);
+  if (location.hash.indexOf('#nueva-comida') === 0) {
+    const qIdx = location.hash.indexOf('?');
+    const params = new URLSearchParams(qIdx>=0 ? location.hash.slice(qIdx+1) : '');
+    const restaurante = params.get('restaurante') || '';
+    const fecha = params.get('fecha') || '';
+    setTimeout(() => { try { switchTab('comidas'); abrirRegistrarComidaModal(fecha||undefined, fecha?guessSlotActual():undefined, restaurante||undefined); } catch (e) {} }, 400);
   }
 });
 </script>
