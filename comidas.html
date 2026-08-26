@@ -203,7 +203,7 @@ nav.tabbar button .ic{font-size:18px}
       <div class="card"><div class="body" id="nutriDashboard"></div></div>
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn" style="flex:1" onclick="abrirRegistrarComidaModal()">📸 Registrar comida</button>
-        <button class="btn ghost" style="flex:1" onclick="pedirSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
+        <button class="btn ghost" style="flex:1" onclick="abrirPanelSugerenciaComidaIA()">💡 Sugerencias de comida (IA)</button>
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
       <div id="nutriSugerencia"></div>
@@ -313,7 +313,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza3';
+const BUILD_VERSION = 'Chichenitza4';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -2557,12 +2557,12 @@ guardarCocinado = async function(recetaId){
 // ============================================================
 //  Comidas: conteo de calorías con IA
 // ============================================================
-function caloriasRestantesHoy(){
+function caloriasRestantesParaFecha(fecha){
   const meta = Number(usuarioActivo.MetaCalorias)||0;
-  const hoyISO = hoyLocalISO();
-  const consumido = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===hoyISO && !esVerdadero(r.Papelera)).reduce((s,r)=>s+(Number(r.Energia)||0),0);
+  const consumido = DATA.nutricion_log.filter(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera)).reduce((s,r)=>s+(Number(r.Energia)||0),0);
   return { meta, consumido, restante: meta - consumido };
 }
+function caloriasRestantesHoy(){ return caloriasRestantesParaFecha(hoyLocalISO()); }
 function renderNutriDashboard(){
   if(!usuarioActivo) return;
   const cont = document.getElementById('nutriDashboard'); if(!cont) return;
@@ -2921,22 +2921,64 @@ async function guardarComidaRegistrada(){
     if(btn){ btn.disabled=false; btn.textContent='💾 Registrar esta comida'; }
   }
 }
+// Antes solo daba UNA sugerencia fija para "ahora mismo". Pedido explícito:
+// poder escribir qué se necesita ("dame toda la recomendación para mañana",
+// "solo qué cenar hoy según mis kcal disponibles") y para qué día, y que la
+// IA decida sola si eso es una sola comida o el día completo — el backend
+// siempre regresa una LISTA (de 1 a 4), cada una con su slot.
+function abrirPanelSugerenciaComidaIA(){
+  const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
+  cont.innerHTML = `<div class="card"><div class="body">
+    <div class="field"><label>¿Para qué día?</label><input type="date" id="sugFecha" value="${hoyLocalISO()}"></div>
+    <div class="field"><label>¿Qué necesitas? (opcional — vacío = una sugerencia rápida para ahora)</label>
+      <textarea id="sugTexto" rows="2" placeholder="ej: dame toda la recomendación para mañana (desayuno, comida y cena) — o — solo sugiéreme qué cenar hoy"></textarea>
+    </div>
+    <button class="btn" id="sugPedirBtn" onclick="pedirSugerenciaComidaIA()">🤖 Pedir sugerencia</button>
+  </div></div>`;
+}
 async function pedirSugerenciaComidaIA(){
   const cont = document.getElementById('nutriSugerencia'); if(!cont) return;
-  cont.innerHTML = '<p class="hint">🤖 Pensando…</p>';
-  const { meta, restante } = caloriasRestantesHoy();
-  const recetas = activos(DATA.recetas).map(r=>({id:r.ID, nombre:r.Nombre, categoria:r.Categoria}));
-  const body = { alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||'', recetas };
-  if(meta) body.caloriasRestantes = restante;
-  const r = await apiPost('sugerirComidaConIA', body);
-  if(!r.ok){ cont.innerHTML = `<p class="hint">No se pudo sugerir: ${escAttr(r.error||'sin conexión')}</p>`; return; }
-  cont.innerHTML = `<div class="idea-card">
-    <div class="titulo" style="font-weight:700">${escAttr(r.nombre||'Sugerencia')}</div>
-    <div class="meta hint">~${Math.round(r.energia||0)} kcal</div>
-    ${r.nota?`<p style="margin:8px 0 4px">${escAttr(r.nota)}</p>`:''}
-    <p class="hint" style="margin-top:8px">🤖 ${mensajeModelo(r,'Sugerido')}</p>
-    ${r.origen==='receta_existente' && r.recetaId ? `<button class="btn" style="margin-top:8px" onclick="abrirRecetaDetalle('${r.recetaId}')">🍽 Ver receta</button>` : ''}
-  </div>`;
+  const fecha = (document.getElementById('sugFecha')||{}).value || hoyLocalISO();
+  const instruccion = (document.getElementById('sugTexto')||{}).value.trim() || '';
+  const btn = document.getElementById('sugPedirBtn');
+  if(btn){ btn.disabled = true; btn.textContent = '🤖 Pensando…'; }
+  try{
+    const { meta, restante } = caloriasRestantesParaFecha(fecha);
+    const recetas = activos(DATA.recetas).map(r=>({id:r.ID, nombre:r.Nombre, categoria:r.Categoria}));
+    const body = { alergias: usuarioActivo.PreferenciasAlergias||'', disgustos: usuarioActivo.PreferenciasDisgustos||'', favoritos: usuarioActivo.PreferenciasFavoritos||'', recetas, instruccion, fecha };
+    if(meta) body.caloriasRestantes = restante;
+    const r = await apiPost('sugerirComidaConIA', body, 45000);
+    if(!r.ok){ showToast('No se pudo sugerir: '+(r.error||'sin conexión')); return; }
+    const sugerencias = r.sugerencias || [];
+    window._ultimasSugerenciasComida = sugerencias;
+    if(!sugerencias.length){ cont.innerHTML += '<p class="hint">La IA no devolvió ninguna sugerencia, intenta de nuevo.</p>'; return; }
+    cont.innerHTML = `<p class="hint">🤖 ${mensajeModelo(r,'Sugerido')} para ${fmtFecha(fecha)}</p>` + sugerencias.map((s,i)=>`
+      <div class="idea-card">
+        <div class="titulo" style="font-weight:700">${s.slot?(SLOT_ICONOS[s.slot]||'')+' '+escAttr(s.slot)+' — ':''}${escAttr(s.nombre||'Sugerencia')}</div>
+        <div class="meta hint">~${Math.round(s.energia||0)} kcal</div>
+        ${s.nota?`<p style="margin:8px 0 4px">${escAttr(s.nota)}</p>`:''}
+        <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button class="btn" onclick="usarSugerenciaComida(${i},'${fecha}')">👍 Usar esta</button>
+          ${s.origen==='receta_existente' && s.recetaId ? `<button class="btn ghost" onclick="abrirRecetaDetalle('${s.recetaId}')">🍽 Ver receta</button>` : ''}
+        </div>
+      </div>`).join('') + `<button class="btn ghost" style="margin-top:6px" onclick="abrirPanelSugerenciaComidaIA()">🔄 Pedir otra cosa</button>`;
+  }catch(e){
+    console.error('pedirSugerenciaComidaIA', e);
+    showToast('Error inesperado al sugerir: '+(e&&e.message?e.message:e));
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🤖 Pedir sugerencia'; }
+  }
+}
+// "Usar esta" abre el registro normal (foto/texto/Analizar/macros/estrellas)
+// ya con el nombre sugerido puesto — el usuario sigue pudiendo editar todo
+// y confirmar antes de guardar, no se agrega solo.
+function usarSugerenciaComida(i, fecha){
+  const s = (window._ultimasSugerenciasComida||[])[i]; if(!s) return;
+  const slot = s.slot && SLOTS.includes(s.slot) ? s.slot : guessSlotActual();
+  abrirRegistrarComidaModal(fecha, slot);
+  const el = document.getElementById('comidaTexto');
+  if(el) el.value = s.nombre || '';
+  if(s.origen==='receta_existente' && s.recetaId) window._comidaRecetaId = s.recetaId;
 }
 
 // ============================================================
