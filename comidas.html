@@ -317,7 +317,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichenitza5';
+const BUILD_VERSION = 'Chichenitza6';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -335,7 +335,10 @@ function showToast(msg){ const t=document.getElementById('toast'); t.textContent
 function escAttr(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function hoyLocalISO(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function horaActualHHMM(){ const d=new Date(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
-function horaHHMM(iso){ if(!iso) return horaActualHHMM(); const d=new Date(iso); if(isNaN(d)) return horaActualHHMM(); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+// Antes cuando no había hora guardada (plan a futuro, todavía sin pasar)
+// regresaba la hora ACTUAL como si fuera un dato real — ahora regresa vacío
+// de verdad, para no inventar una hora que no pasó.
+function horaHHMM(iso){ if(!iso) return ''; const d=new Date(iso); if(isNaN(d)) return ''; return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function fmtFecha(iso){ if(!iso) return ''; const [y,m,d] = String(iso).slice(0,10).split('-'); return d && m && y ? d+'/'+m+'/'+y : iso; }
 function fmtHora(iso){ if(!iso) return ''; const d = new Date(iso); if(isNaN(d)) return ''; return d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); }
 function fmtMoneda(v){ if(v===null||v===undefined||v==='') return ''; return '$'+Number(v).toFixed(2); }
@@ -2655,15 +2658,15 @@ function abrirRegistrarComidaModal(fechaFija, slotFijo, restauranteFijo){
     <p class="hint">Elige una receta que ya tengas o escribe qué comiste, manda una foto si quieres, y usa 🤖 Analizar para que la IA sugiera los datos de abajo — todo se puede editar antes de guardar.</p>
     ${dirigido ? `
       <p class="hint">${SLOT_ICONOS[slotFijo]||''} <b>${escAttr(slotFijo)}</b> — ${fmtFecha(fechaFija)}</p>
-      <input type="hidden" id="comidaFecha" value="${escAttr(fechaFija)}">
+      <input type="hidden" id="comidaFecha" value="${escAttr(fechaFija)}" onchange="actualizarHoraSegunFecha();actualizarVeredictoComida()">
       <input type="hidden" id="comidaSlot" value="${escAttr(slotFijo)}">
-      <div class="field"><label>Hora</label>
-        <input type="time" id="comidaHora" value="${horaActualHHMM()}" style="width:auto">
+      <div class="field"><label>Hora ${fechaFija!==hoyLocalISO()?'(déjalo vacío si todavía no pasa)':''}</label>
+        <input type="time" id="comidaHora" value="${fechaFija===hoyLocalISO()?horaActualHHMM():''}" style="width:auto">
       </div>
     ` : `
     <div class="field"><label>Cuándo</label>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <input type="date" id="comidaFecha" value="${hoyLocalISO()}" style="flex:1;min-width:130px">
+        <input type="date" id="comidaFecha" value="${hoyLocalISO()}" style="flex:1;min-width:130px" onchange="actualizarHoraSegunFecha();actualizarVeredictoComida()">
         <select id="comidaSlot" style="flex:1;min-width:110px">${SLOTS.filter(s=>s!=='Preparado').map(s=>`<option value="${s}" ${s===guessSlotActual()?'selected':''}>${SLOT_ICONOS[s]} ${s}</option>`).join('')}</select>
         <input type="time" id="comidaHora" value="${horaActualHHMM()}" style="flex:0 0 100px">
       </div>
@@ -2792,15 +2795,34 @@ function renderComidaNuevaEstrellas(){
   const el = document.getElementById('comidaEstrellas'); if(!el) return;
   el.innerHTML = `<span class="estrellas">` + [1,2,3,4,5].map(n=>`<span class="${n<=window._comidaNuevaEstrellas?'on':''}" onclick="window._comidaNuevaEstrellas=${n};renderComidaNuevaEstrellas()">★</span>`).join('') + `</span>`;
 }
+// Si el día que se está agendando no es hoy, no tiene sentido que la Hora
+// arranque en el reloj actual (23:32 en un plan para dentro de dos días) —
+// se deja vacía hasta que de verdad se sepa a qué hora pasó/va a pasar.
+function actualizarHoraSegunFecha(){
+  const fechaEl = document.getElementById('comidaFecha');
+  const horaEl = document.getElementById('comidaHora');
+  if(!fechaEl || !horaEl) return;
+  const esHoy = fechaEl.value === hoyLocalISO();
+  if(esHoy){ if(!horaEl.value) horaEl.value = horaActualHHMM(); }
+  else{ horaEl.value = ''; }
+}
 function actualizarVeredictoComida(){
   const el = document.getElementById('comidaVeredicto'); if(!el) return;
   const energiaInput = document.getElementById('comidaCampo_Energia');
   const energia = Number(energiaInput?energiaInput.value:0)||0;
-  const { meta, restante } = caloriasRestantesHoy();
+  // Antes siempre comparaba contra lo que resta HOY, aunque se estuviera
+  // agendando un día distinto (ej. registrar la cena de mañana avisaba con
+  // las calorías de hoy) — ahora usa el día que de verdad está en el campo
+  // Fecha del formulario (fijo si se abrió desde un slot, o el que se haya
+  // elegido si no).
+  const fechaEl = document.getElementById('comidaFecha');
+  const fecha = (fechaEl && fechaEl.value) || hoyLocalISO();
+  const { meta, restante } = caloriasRestantesParaFecha(fecha);
   if(!meta){ el.textContent = 'Pon tu meta diaria (arriba en Comidas) para ver si esto te alcanza.'; el.style.color=''; return; }
   const despues = restante - energia;
-  if(despues >= 0){ el.textContent = `✅ Cabe — te quedarían ${Math.round(despues)} kcal después de esto.`; el.style.color = 'var(--success)'; }
-  else { el.textContent = `⚠️ Te pasarías por ${Math.round(-despues)} kcal si comes esto.`; el.style.color = 'var(--danger)'; }
+  const cuando = fecha===hoyLocalISO() ? '' : ` el ${fmtFecha(fecha)}`;
+  if(despues >= 0){ el.textContent = `✅ Cabe — te quedarían ${Math.round(despues)} kcal${cuando?' ese día':''} después de esto.`; el.style.color = 'var(--success)'; }
+  else { el.textContent = `⚠️ Te pasarías por ${Math.round(-despues)} kcal${cuando} si comes esto.`; el.style.color = 'var(--danger)'; }
 }
 // Fase D: catálogo de restaurantes vinculado — busca por nombre (sin
 // distinguir mayúsculas) antes de crear, para que "Sushi Ken" e Itinerario
@@ -2870,8 +2892,12 @@ async function guardarComidaRegistrada(){
       else showToast('No se pudo subir la foto (se guarda sin foto): '+(up.error||'sin conexión'));
     }
     const fechaVal = document.getElementById('comidaFecha').value || hoyLocalISO();
-    const horaVal = (document.getElementById('comidaHora')||{}).value || horaActualHHMM();
-    const horaDate = new Date(fechaVal+'T'+horaVal+':00');
+    // Si el día es hoy y no se puso hora, se asume "ahora". Si es un día
+    // distinto (plan a futuro) y se dejó vacía, se queda vacía de verdad —
+    // antes siempre caía en la hora actual, sin sentido para algo que
+    // todavía no pasa; se completa después, al editarlo, cuando sí pase.
+    const horaVal = (document.getElementById('comidaHora')||{}).value || (fechaVal===hoyLocalISO() ? horaActualHHMM() : '');
+    const horaDate = horaVal ? new Date(fechaVal+'T'+horaVal+':00') : null;
     // Fase D: restaurante (catálogo vinculado, no solo texto libre — pedido
     // explícito) + costo opcional que, si se marca la casilla, también se
     // manda a Gastos (nunca automático).
@@ -2886,7 +2912,7 @@ async function guardarComidaRegistrada(){
     // Gastos aunque la casilla estuviera marcada).
     const intentaMandarGastos = costo!=='' && (document.getElementById('comidaMandarGastos')||{}).checked;
     const row = {
-      ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: isNaN(horaDate) ? new Date().toISOString() : horaDate.toISOString(),
+      ID: uid(), Usuario: usuarioActivo.ID, Fecha: fechaVal, Hora: (horaDate && !isNaN(horaDate)) ? horaDate.toISOString() : '',
       Slot: document.getElementById('comidaSlot').value || guessSlotActual(),
       Descripcion: descripcion, FotoURL: fotoUrl,
       Energia: valores.Energia, Grasas: valores.Grasas, GrasasSaturadas: valores.GrasasSaturadas,
