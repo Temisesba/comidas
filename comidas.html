@@ -46,6 +46,11 @@ header .userbtn{background:var(--accent-soft);color:var(--accent);border:none;bo
 #connBanner{background:var(--danger-soft);color:var(--danger);font-size:13px;text-align:center;padding:6px;display:none}
 #connBanner.show{display:block}
 main{max-width:900px;margin:0 auto;padding:16px}
+/* Título+resumen+encabezado de columnas de "Hoy" pegados justo debajo del
+   header de la app mientras se hace scroll por las tarjetas — top se fija
+   por JS (actualizarAlturaHeader) a la altura real del <header>, no un
+   número fijo, para no romperse si el título del header cambia de tamaño. */
+.hoy-sticky{position:sticky;top:var(--header-h,54px);z-index:15;background:var(--bg);padding-top:2px;padding-bottom:4px}
 .screen{display:none}
 .screen.active{display:block}
 
@@ -364,7 +369,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Chichen';
+const BUILD_VERSION = 'Bonampak';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1044,12 +1049,22 @@ function intentarPassword(id){
   if(intento !== u.Password){ document.getElementById('passErr').textContent = 'Contraseña incorrecta'; return; }
   activarUsuario(u);
 }
+// Altura real del <header> (para .hoy-sticky) — se mide en JS en vez de un
+// número fijo porque el header solo tiene tamaño real una vez que #app deja
+// de estar display:none, y así tampoco se rompe si el texto del header
+// llegara a ocupar más de una línea en una pantalla angosta.
+function actualizarAlturaHeader(){
+  const h = document.querySelector('header');
+  if(h) document.documentElement.style.setProperty('--header-h', h.offsetHeight+'px');
+}
+window.addEventListener('resize', actualizarAlturaHeader);
 function activarUsuario(u){
   usuarioActivo = u;
   localStorage.setItem('comidas_usuario_id', u.ID);
   document.getElementById('userScreen').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('userBtnHeader').textContent = '👤 '+u.Nombre;
+  actualizarAlturaHeader();
   switchTab('inicio');
   renderAllScreens();
   refreshData();
@@ -1241,8 +1256,8 @@ function renderInicioHoy(){
   // Encabezado y fila de totales del día comparten el helper con la pestaña
   // Comidas y el Calendario (evita mantener el mismo % en tres lugares) — se
   // les agrega el espaciador de 52px para alinear con la columna del ▾/▴.
-  const encabezadoCols = registros.length ? `<div style="padding:0 12px;margin-bottom:4px;display:flex;gap:6px">${encabezadoColumnasMacrosDia()}<div style="width:52px"></div></div>` : '';
-  const filaTotalesDia = (registros.length && metaDia) ? `<div style="padding:0 12px;margin-bottom:10px;display:flex;gap:6px">${filaColumnasMacrosDia(hoyISO)}<div style="width:52px"></div></div>` : '';
+  const encabezadoCols = registros.length ? `<div style="padding:0 10px;margin-bottom:4px;display:flex;gap:6px">${encabezadoColumnasMacrosDia()}<div style="width:52px"></div></div>` : '';
+  const filaTotalesDia = (registros.length && metaDia) ? `<div style="padding:0 10px;margin-bottom:10px;display:flex;gap:6px">${filaColumnasMacrosDia(hoyISO)}<div style="width:52px"></div></div>` : '';
   const tarjetasSlots = slotsMostrar.map(slot=>{
     const regsSlot = registros.filter(r=>r.Slot===slot);
     const calSlotTodas = calEntradas.filter(e=>e.Slot===slot);
@@ -1281,14 +1296,19 @@ function renderInicioHoy(){
         <div style="font-weight:700">${SLOT_ICONOS[slot]} ${slot}</div>
         <div style="font-weight:700;color:var(--success)">${Math.round(totalKcalSlot)}</div>
       </div>
-      <div style="display:flex;gap:6px;padding:0 12px 8px;color:var(--text-soft);font-size:12px;cursor:pointer" onclick="toggleInicioSlot('${slot}')">
+      <div style="display:flex;gap:6px;padding:0 10px 8px;color:var(--text-soft);font-size:12px;cursor:pointer" onclick="toggleInicioSlot('${slot}')">
         ${colsHtml(totalesSlot.map(v=>red1(v)))}
         <div style="width:52px;text-align:right">${abierto?'▴':'▾'}</div>
       </div>
-      ${abierto?`<div style="padding:0 12px 12px">${filasCalendario}${filasRegistros}${filaAgregar}</div>`:''}
+      ${abierto?`<div style="padding:0 0 12px">${filasCalendario}${filasRegistros}${filaAgregar}</div>`:''}
     </div>`;
   }).join('');
-  cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div>${resumenPlaneado?`<p class="hint" style="margin:-4px 0 8px">${resumenPlaneado}</p>`:''}${encabezadoCols}${filaTotalesDia}${tarjetasSlots}`;
+  // Título + resumen de kcal + encabezado de columnas + totales del día
+  // quedan FIJOS arriba mientras se hace scroll por las tarjetas de abajo
+  // (pedido explícito: "las primeras 2 o 3 filas fijas") — position:sticky
+  // con top = altura real del header de la app (medida en JS, ver
+  // actualizarAlturaHeader) para que quede pegado justo debajo, no encima.
+  cont.innerHTML = `<div class="hoy-sticky"><div class="grupo-titulo">🍽️ Hoy</div>${resumenPlaneado?`<p class="hint" style="margin:-4px 0 8px">${resumenPlaneado}</p>`:''}${encabezadoCols}${filaTotalesDia}</div>${tarjetasSlots}`;
   activarArrastreComidasEn(cont);
   renderActividadHoy('inicioActividadHoy');
 }
@@ -2922,11 +2942,30 @@ function macrosRealizadosParaFecha(fecha){
 // Sal no tiene calorías (KCAL_POR_G_MACRO.Sal=0) así que un "% de mis kcal"
 // no tiene sentido para ella — se deja en gramos contra su tope, con el
 // tope entre paréntesis en vez de %/kcal.
+// Ronda 2026-08-28 (4to seguimiento): dos fixes/agregados más pedidos
+// explícitamente sobre esta misma fila:
+// 1) BUG REAL de alineación — encabezadoColumnasMacrosDia/filaColumnasMacrosDia
+//    devolvían un <div display:flex> ENVOLVIENDO al <div flex:1;grid...> real.
+//    Cuando ese HTML se mete como un solo hijo dentro de OTRO flex row (como
+//    hace encabezadoCols/filaTotalesDia en Hoy, junto al espaciador de 52px),
+//    el div envoltorio es un flex-ITEM sin flex-grow propio → se encoge a su
+//    contenido en vez de ocupar el ancho completo, y como cada fila (labels
+//    vs valores) tiene contenido de ancho distinto, cada grid terminaba con
+//    un ancho total DISTINTO — de ahí que las columnas no coincidieran entre
+//    la fila de títulos y la de valores. Fix: estas funciones devuelven
+//    DIRECTO el div flex:1;grid (sin envoltorio), igual que ya hacía
+//    colsHtml() más abajo — así sí es un flex-item real cuando hace falta, y
+//    en los lugares donde no hay flex padre (Comidas, Calendario) un
+//    div flex:1;display:grid sin padre-flex simplemente ocupa el 100% del
+//    bloque (grid es block-level por default), que es lo que se quería igual.
+// 2) Cada columna ahora muestra: mi % (bold), MIS kcal de ese macro, la meta
+//    en % y kcal entre paréntesis, y un balance (mis kcal − meta kcal) en
+//    rojo si me excedí o gris si todavía me falta — pedido explícito.
 const MACRO_COLS_DIA = ['Grasas','GrasasSaturadas','Carbohidratos','Azucares','Fibra','Proteina','Sal'];
 const MACRO_COLS_DIA_LABEL = ['Grasas','Sat','Carbs','Azúcar','Fibra','Prot','Sal'];
 const KCAL_POR_G_MACRO = { Grasas:9, GrasasSaturadas:9, Carbohidratos:4, Azucares:4, Fibra:2, Proteina:4, Sal:0 };
 function encabezadoColumnasMacrosDia(){
-  return `<div class="hint" style="display:flex;gap:4px;margin-bottom:2px;font-size:10px"><div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);text-align:center">${MACRO_COLS_DIA_LABEL.map(l=>`<span>${l}</span>`).join('')}</div></div>`;
+  return `<div class="hint" style="flex:1;display:grid;grid-template-columns:repeat(${MACRO_COLS_DIA.length},1fr);text-align:center;font-size:10px;margin-bottom:2px">${MACRO_COLS_DIA_LABEL.map(l=>`<span>${l}</span>`).join('')}</div>`;
 }
 function filaColumnasMacrosDia(fecha){
   const metaDia = Number(usuarioActivo.MetaCalorias)||0;
@@ -2934,18 +2973,29 @@ function filaColumnasMacrosDia(fecha){
   if(!metas) return '';
   const macros = macrosRealizadosParaFecha(fecha);
   const totalKcal = macros.Energia||0;
-  return `<div style="display:flex;gap:4px"><div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);text-align:center">${MACRO_COLS_DIA.map(c=>{
+  return `<div style="flex:1;display:grid;grid-template-columns:repeat(${MACRO_COLS_DIA.length},1fr);text-align:center">${MACRO_COLS_DIA.map(c=>{
     const val = macros[c]||0;
     const kcalFactor = KCAL_POR_G_MACRO[c];
     const metaG = metas[c]||0;
     if(!kcalFactor){
-      return `<span style="display:flex;flex-direction:column;line-height:1.2"><b style="font-size:12px">${red1(val)}g</b><span style="font-size:9px;color:var(--text-soft)">(${red1(metaG)}g)</span></span>`;
+      // Sal: sin calorías, el balance se ve en gramos contra su tope.
+      const balG = red1(val-metaG);
+      const colorSal = balG>0 ? 'var(--danger)' : 'var(--text-soft)';
+      return `<span style="display:flex;flex-direction:column;line-height:1.15"><b style="font-size:11px">${red1(val)}g</b><span style="font-size:8px;color:var(--text-soft)">meta ${red1(metaG)}g</span><span style="font-size:8px;color:${colorSal}">${balG>0?'+':''}${balG}g</span></span>`;
     }
-    const miPct = totalKcal ? Math.round((val*kcalFactor)/totalKcal*100) : null;
+    const miKcal = Math.round(val*kcalFactor);
+    const miPct = totalKcal ? Math.round((miKcal/totalKcal)*100) : null;
     const metaKcal = Math.round(metaG*kcalFactor);
     const metaPct = metaDia ? Math.round((metaKcal/metaDia)*100) : null;
-    return `<span style="display:flex;flex-direction:column;line-height:1.2"><b style="font-size:12px">${miPct!==null?miPct+'%':'—'}</b><span style="font-size:9px;color:var(--text-soft)">(${metaPct!==null?metaPct+'%':'—'}·${metaKcal}kcal)</span></span>`;
-  }).join('')}</div></div>`;
+    const balance = miKcal-metaKcal; // + = me excedí, - = todavía me falta
+    const colorBal = balance>0 ? 'var(--danger)' : 'var(--text-soft)';
+    return `<span style="display:flex;flex-direction:column;line-height:1.15">
+      <b style="font-size:11px">${miPct!==null?miPct+'%':'—'}</b>
+      <span style="font-size:8px;color:var(--text-soft)">${miKcal}kcal</span>
+      <span style="font-size:8px;color:var(--text-soft)">meta ${metaPct!==null?metaPct+'%':'—'} · ${metaKcal}kcal</span>
+      <span style="font-size:8px;font-weight:700;color:${colorBal}">${balance>0?'+':''}${balance}${balance>0?' exced.':' falta'}</span>
+    </span>`;
+  }).join('')}</div>`;
 }
 let mostrarMacrosDashboard = false;
 function toggleMacrosDashboard(){ mostrarMacrosDashboard = !mostrarMacrosDashboard; renderNutriDashboard(); }
