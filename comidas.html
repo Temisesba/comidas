@@ -139,11 +139,23 @@ nav.tabbar button .ic{font-size:18px}
 
 .dia-col{margin-bottom:18px}
 .dia-header{font-weight:700;font-size:14px;margin-bottom:6px}
-.slot-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:6px}
+.slot-row{position:relative;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;background:var(--bg-card);box-shadow:var(--shadow);margin-bottom:6px}
 .slot-row .slot-nombre{width:80px;flex:none;font-size:12px;color:var(--text-soft)}
 .slot-row .slot-contenido{flex:1;font-size:13px}
 .slot-row.vacio{opacity:.6}
 .slot-row.cocinado{background:var(--success-soft)}
+/* Arrastrar una comida para moverla de Slot/día (mismo gesto que Itinerario):
+   mantener presionado arma el arrastre llenando esta franja; .arrastrando-comida
+   es el estilo mientras sigue al dedo; .slot-drop-target es cualquier tarjeta/
+   grupo donde se puede soltar, resaltado mientras hay un arrastre en curso. */
+.drag-arm-fill{position:absolute;left:0;bottom:0;height:4px;width:0;background:var(--text);opacity:.6;transition:width 1.2s linear;border-radius:0 0 10px 10px;pointer-events:none;z-index:2}
+.slot-row.arrastrando-comida{opacity:.8;box-shadow:0 4px 14px rgba(0,0,0,0.25);cursor:grabbing}
+.slot-drop-target.drop-visible{outline:2px dashed var(--border);outline-offset:-2px}
+.slot-drop-target.drop-over{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+.drop-confirm{position:fixed;transform:translateX(-50%);z-index:4000;display:flex;gap:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:20px;padding:4px 6px;box-shadow:0 6px 16px rgba(0,0,0,0.25)}
+.drop-confirm button{border:none;background:var(--bg);font-size:16px;line-height:1;cursor:pointer;padding:4px 10px;border-radius:14px}
+.drop-confirm button.ok{background:var(--success-soft);color:var(--success)}
+.drop-confirm button.cancel{background:var(--danger-soft);color:var(--danger)}
 
 .idea-card{background:var(--accent-soft);border-radius:var(--radius);padding:14px;margin-top:10px}
 
@@ -353,7 +365,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Coba';
+const BUILD_VERSION = 'Uxmal';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1227,25 +1239,12 @@ function renderInicioHoy(){
   // Sal/Grasas/Carbohidratos/Proteína, y cada comida adentro repite esas
   // mismas 4 columnas debajo de su nombre. Los encabezados de columna se
   // muestran UNA sola vez arriba de todas las tarjetas.
-  const MACRO_COLS = ['Sal','Grasas','Carbohidratos','Proteina'];
-  const MACRO_COLS_LABEL = ['Sal','Grasas','Carbs','Prot'];
   const colsHtml = (vals)=>`<div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${vals.map(v=>`<span>${v}</span>`).join('')}</div>`;
-  const encabezadoCols = registros.length ? `<div class="hint" style="display:flex;gap:6px;padding:0 12px;margin-bottom:4px;font-size:11px">${colsHtml(MACRO_COLS_LABEL)}<div style="width:52px"></div></div>` : '';
-  // Fila de totales del día: cuánto llevas de cada macro y qué % de tu meta
-  // diaria representa (pedido explícito: por columna, no en lista vertical
-  // como ya hacía filaMacroDashboard más abajo).
-  const macrosHoyCols = macrosRealizadosParaFecha(hoyISO);
-  const metasCols = metasMacrosDiarias(metaDia);
-  const filaTotalesDia = (registros.length && metasCols) ? `<div style="display:flex;gap:6px;padding:0 12px;margin-bottom:10px">
-    <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${MACRO_COLS.map(c=>{
-      const val = macrosHoyCols[c]||0;
-      const meta = metasCols[c]||0;
-      const pct = meta ? Math.round((val/meta)*100) : null;
-      const color = pct===null ? 'var(--text-soft)' : (pct>100?'var(--danger)':'var(--success)');
-      return `<span style="display:flex;flex-direction:column;line-height:1.25"><b style="font-size:13px">${red1(val)}g</b>${pct!==null?`<span style="font-size:10px;color:${color}">${pct}%</span>`:''}</span>`;
-    }).join('')}</div>
-    <div style="width:52px"></div>
-  </div>` : '';
+  // Encabezado y fila de totales del día comparten el helper con la pestaña
+  // Comidas y el Calendario (evita mantener el mismo % en tres lugares) — se
+  // les agrega el espaciador de 52px para alinear con la columna del ▾/▴.
+  const encabezadoCols = registros.length ? `<div style="padding:0 12px;margin-bottom:4px;display:flex;gap:6px">${encabezadoColumnasMacrosDia()}<div style="width:52px"></div></div>` : '';
+  const filaTotalesDia = (registros.length && metaDia) ? `<div style="padding:0 12px;margin-bottom:10px;display:flex;gap:6px">${filaColumnasMacrosDia(hoyISO)}<div style="width:52px"></div></div>` : '';
   const tarjetasSlots = slotsMostrar.map(slot=>{
     const regsSlot = registros.filter(r=>r.Slot===slot);
     const calSlotTodas = calEntradas.filter(e=>e.Slot===slot);
@@ -1261,25 +1260,25 @@ function renderInicioHoy(){
     });
     const hayAlgo = regsSlot.length + calSlot.length > 0;
     if(!hayAlgo){
-      return `<div class="card" style="margin-bottom:10px"><div class="slot-row vacio" style="margin:0;box-shadow:none" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-nombre">${SLOT_ICONOS[slot]} ${slot}</span><span class="slot-contenido hint">Nada todavía — toca para agregar</span></div></div>`;
+      return `<div class="card slot-drop-target" data-fecha="${hoyISO}" data-slot="${slot}" style="margin-bottom:10px"><div class="slot-row vacio" style="margin:0;box-shadow:none" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-nombre">${SLOT_ICONOS[slot]} ${slot}</span><span class="slot-contenido hint">Nada todavía — toca para agregar</span></div></div>`;
     }
     const totalKcalSlot = regsSlot.reduce((s,r)=>s+(Number(r.Energia)||0),0);
-    const totalesSlot = MACRO_COLS.map(c=>regsSlot.reduce((s,r)=>s+(Number(r[c])||0),0));
+    const totalesSlot = MACRO_COLS_DIA.map(c=>regsSlot.reduce((s,r)=>s+(Number(r[c])||0),0));
     const abierto = inicioSlotsAbiertos[slot]!==false;
     const filasCalendario = calSlot.map(e=>{
       const nombre = e.RecetaID ? (findReceta(e.RecetaID)?findReceta(e.RecetaID).Nombre:'(receta eliminada)') : e.TextoLibre;
-      return `<div class="slot-row" style="margin:0 0 6px" onclick="abrirAccionesSlot('${e.ID}')"><span class="slot-contenido">${esVerdadero(e.Cocinado)?'✅ ':'📅 '}${escAttr(nombre)}</span></div>`;
+      return `<div class="slot-row" style="margin:0 0 6px" data-arrastrable="calendario" data-id="${e.ID}" data-fecha="${hoyISO}" data-slot="${slot}" onclick="abrirAccionesSlot('${e.ID}')"><span class="slot-contenido">${esVerdadero(e.Cocinado)?'✅ ':'📅 '}${escAttr(nombre)}</span></div>`;
     }).join('');
     const filasRegistros = regsSlot.map(r=>{
       const hecho = esVerdadero(r.Realizado) || cocinadoPorReg[r.ID];
-      const macros = MACRO_COLS.map(c=>red1(r[c]));
-      return `<div class="slot-row" style="margin:0 0 6px;flex-direction:column;align-items:stretch;gap:2px" onclick="abrirAccionesComidaRegistrada('${r.ID}')">
+      const macros = MACRO_COLS_DIA.map(c=>red1(r[c]));
+      return `<div class="slot-row" style="margin:0 0 6px;flex-direction:column;align-items:stretch;gap:2px" data-arrastrable="registro" data-id="${r.ID}" data-fecha="${hoyISO}" data-slot="${slot}" onclick="abrirAccionesComidaRegistrada('${r.ID}')">
         <div style="display:flex;justify-content:space-between;gap:8px"><span>${hecho?'✅':'🕓'} ${escAttr(r.Descripcion||'Comida')}</span><b>${Math.round(r.Energia||0)}</b></div>
         <div style="display:flex;gap:6px;color:var(--text-soft);font-size:12px">${colsHtml(macros)}<div style="width:52px"></div></div>
       </div>`;
     }).join('');
     const filaAgregar = `<div class="slot-row vacio" style="margin:0" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-contenido hint">+ Agregar otra</span></div>`;
-    return `<div class="card" style="margin-bottom:10px">
+    return `<div class="card slot-drop-target" data-fecha="${hoyISO}" data-slot="${slot}" style="margin-bottom:10px">
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;cursor:pointer" onclick="toggleInicioSlot('${slot}')">
         <div style="font-weight:700">${SLOT_ICONOS[slot]} ${slot}</div>
         <div style="font-weight:700;color:var(--success)">${Math.round(totalKcalSlot)}</div>
@@ -1292,6 +1291,7 @@ function renderInicioHoy(){
     </div>`;
   }).join('');
   cont.innerHTML = `<div class="grupo-titulo">🍽️ Hoy</div>${resumenPlaneado?`<p class="hint" style="margin:-4px 0 8px">${resumenPlaneado}</p>`:''}${encabezadoCols}${filaTotalesDia}${tarjetasSlots}`;
+  activarArrastreComidasEn(cont);
   renderActividadHoy('inicioActividadHoy');
 }
 let inicioSlotsAbiertos = { Desayuno:true, Comida:true, Cena:true, Snack:true };
@@ -2514,6 +2514,122 @@ let calendarioOffsetDias = -3;
 function fechaLocalISO(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function moverVentanaCalendario(delta){ calendarioOffsetDias += delta; renderCalendario(); }
 function irAHoyCalendario(){ calendarioOffsetDias = -3; renderCalendario(); }
+
+// ============================================================
+//  Arrastrar una comida para moverla de Slot (y de día, en el Calendario
+//  semanal) — mismo gesto que ya usa Itinerario (itinerario_v56.html,
+//  startWeekMove/mostrarConfirmarDrop): mantener presionado 1.2s "arma" el
+//  arrastre (una franja se va llenando como aviso; soltar antes, o moverse
+//  antes de que termine de llenarse, cancela sin tocar nada — y si fue un
+//  toque simple, el onclick normal del renglón sigue funcionando igual que
+//  siempre, porque acá nunca se hace preventDefault en un toque corto).
+//  Recién armado sigue al dedo; al soltar sobre un ".slot-drop-target"
+//  distinto de donde empezó aparece ✓/✗ para confirmar el cambio o volver
+//  a su lugar (igual que Itinerario).
+// ============================================================
+const DRAG_HOLD_MS = 1200;
+function activarArrastreComida(el){
+  if(!el || el._arrastreActivado) return;
+  el._arrastreActivado = true;
+  const item = { tipo: el.dataset.arrastrable, id: el.dataset.id, fecha: el.dataset.fecha, slot: el.dataset.slot };
+  let startX, startY, holdTimer, fill, pid;
+  function onDown(ev){
+    if(ev.pointerType==='mouse' && ev.button!==0) return;
+    startX = ev.clientX; startY = ev.clientY; pid = ev.pointerId;
+    fill = document.createElement('div');
+    fill.className = 'drag-arm-fill';
+    el.appendChild(fill);
+    requestAnimationFrame(()=>{ if(fill) fill.style.width = '100%'; });
+    holdTimer = setTimeout(()=>{
+      document.removeEventListener('pointermove', onArmandoMove);
+      document.removeEventListener('pointerup', onArmandoUp);
+      if(fill){ fill.remove(); fill = null; }
+      iniciarArrastre(ev);
+    }, DRAG_HOLD_MS);
+    document.addEventListener('pointermove', onArmandoMove);
+    document.addEventListener('pointerup', onArmandoUp);
+  }
+  function cancelarArmado(){
+    clearTimeout(holdTimer);
+    if(fill){ fill.remove(); fill = null; }
+    document.removeEventListener('pointermove', onArmandoMove);
+    document.removeEventListener('pointerup', onArmandoUp);
+  }
+  function onArmandoMove(ev){
+    if(Math.abs(ev.clientX-startX)>10 || Math.abs(ev.clientY-startY)>10) cancelarArmado();
+  }
+  function onArmandoUp(){ cancelarArmado(); } // toque simple: el onclick del renglón sigue su curso solo
+  let rect0;
+  function iniciarArrastre(ev){
+    el.classList.add('arrastrando-comida');
+    el.style.pointerEvents = 'none'; // para que elementsFromPoint encuentre el slot de ABAJO, no el propio renglón
+    rect0 = el.getBoundingClientRect();
+    el.style.position = 'fixed'; el.style.left = rect0.left+'px'; el.style.top = rect0.top+'px';
+    el.style.width = rect0.width+'px'; el.style.zIndex = 3000;
+    try{ el.setPointerCapture(pid); }catch(_e){}
+    document.querySelectorAll('.slot-drop-target').forEach(t=>t.classList.add('drop-visible'));
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+  }
+  function objetivoBajoPuntero(ev){
+    const els = document.elementsFromPoint(ev.clientX, ev.clientY);
+    return els.find(e=>e.classList && e.classList.contains('slot-drop-target'));
+  }
+  function onMove(ev){
+    el.style.left = (rect0.left + (ev.clientX-startX)) + 'px';
+    el.style.top = (rect0.top + (ev.clientY-startY)) + 'px';
+    document.querySelectorAll('.slot-drop-target.drop-over').forEach(t=>t.classList.remove('drop-over'));
+    const target = objetivoBajoPuntero(ev);
+    if(target) target.classList.add('drop-over');
+  }
+  function onUp(ev){
+    document.removeEventListener('pointermove', onMove);
+    document.removeEventListener('pointerup', onUp);
+    try{ el.releasePointerCapture(pid); }catch(_e){}
+    document.querySelectorAll('.slot-drop-target').forEach(t=>{ t.classList.remove('drop-visible'); t.classList.remove('drop-over'); });
+    const target = objetivoBajoPuntero(ev);
+    el.style.position=''; el.style.left=''; el.style.top=''; el.style.width=''; el.style.zIndex=''; el.style.pointerEvents='';
+    el.classList.remove('arrastrando-comida');
+    if(!target) return; // soltado fuera de cualquier slot: no cambia nada
+    const nuevaFecha = target.dataset.fecha, nuevoSlot = target.dataset.slot;
+    if(nuevaFecha===item.fecha && nuevoSlot===item.slot) return; // mismo lugar: nada que confirmar
+    mostrarConfirmarArrastreComida(el, ()=>moverComidaArrastrada(item.tipo, item.id, nuevaFecha, nuevoSlot), ()=>{ renderInicioHoy(); renderCalendario(); });
+  }
+  el.addEventListener('pointerdown', onDown);
+}
+// Activa el gesto en todos los renglones arrastrables recién insertados en
+// un contenedor — se llama al final de cada render (renderInicioHoy,
+// renderCalendario) porque el innerHTML nuevo reemplaza los elementos
+// anteriores (y sus listeners) cada vez.
+function activarArrastreComidasEn(contenedor){
+  if(!contenedor) return;
+  contenedor.querySelectorAll('[data-arrastrable]').forEach(activarArrastreComida);
+}
+function mostrarConfirmarArrastreComida(el, onOk, onCancel){
+  document.querySelectorAll('.drop-confirm').forEach(p=>p.remove());
+  const pill = document.createElement('div');
+  pill.className = 'drop-confirm';
+  pill.innerHTML = `<button type="button" class="ok" title="Mover aquí">✓</button><button type="button" class="cancel" title="Volver a su lugar">✗</button>`;
+  document.body.appendChild(pill);
+  const r = el.getBoundingClientRect();
+  pill.style.left = (r.left + r.width/2) + 'px';
+  pill.style.top = Math.min(window.innerHeight-40, r.bottom+6) + 'px';
+  const limpiar = ()=> pill.remove();
+  const timer = setTimeout(()=>{ limpiar(); onCancel(); }, 8000);
+  pill.querySelector('.ok').addEventListener('click', ev=>{ ev.stopPropagation(); clearTimeout(timer); limpiar(); onOk(); });
+  pill.querySelector('.cancel').addEventListener('click', ev=>{ ev.stopPropagation(); clearTimeout(timer); limpiar(); onCancel(); });
+}
+async function moverComidaArrastrada(tipo, id, nuevaFecha, nuevoSlot){
+  const tabla = tipo==='registro' ? 'NUTRICION_LOG' : 'CALENDARIO';
+  const lista = tipo==='registro' ? DATA.nutricion_log : DATA.calendario;
+  const row = lista.find(x=>x.ID===id); if(!row) return;
+  row.Fecha = nuevaFecha; row.Slot = nuevoSlot;
+  guardarCacheLocal();
+  renderInicioHoy(); renderCalendario();
+  showToast('✓ Movido a '+(nuevaFecha===hoyLocalISO()?'Hoy':fmtFecha(nuevaFecha))+' · '+nuevoSlot);
+  await apiPost('saveRow', { table: tabla, row });
+}
+
 function renderCalendario(){
   if(!usuarioActivo) return;
   const dias = [];
@@ -2527,7 +2643,10 @@ function renderCalendario(){
       <button class="btn ghost" onclick="irAHoyCalendario()">Hoy</button>
       <button class="btn ghost" onclick="moverVentanaCalendario(7)">Siguientes ›</button>
     </div>`;
-  document.getElementById('calendarioLista').innerHTML = nav + dias.map((fecha)=>{
+  // Encabezado de columnas de macros UNA sola vez arriba de todos los días
+  // (cada día abajo solo repite los números, no las etiquetas).
+  const encabezadoMacros = (Number(usuarioActivo.MetaCalorias)||0) ? encabezadoColumnasMacrosDia() : '';
+  document.getElementById('calendarioLista').innerHTML = nav + encabezadoMacros + dias.map((fecha)=>{
     const etiqueta = fecha===hoyISO ? 'Hoy' : new Date(fecha+'T00:00:00').toLocaleDateString('es-MX',{weekday:'long',day:'numeric',month:'short'});
     const metaDia = Number(usuarioActivo.MetaCalorias)||0;
     const consumidoDia = registros.filter(r=>r.Fecha===fecha).reduce((s,r)=>s+(Number(r.Energia)||0),0);
@@ -2535,7 +2654,10 @@ function renderCalendario(){
     const resumenDia = metaDia
       ? `${Math.round(consumidoDia)} / ${metaDia} kcal · ${balanceDia>=0?'faltan '+Math.round(balanceDia):'⚠️ pasado por '+Math.round(-balanceDia)}`
       : (consumidoDia ? `${Math.round(consumidoDia)} kcal` : '');
-    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>${resumenDia?`<div class="hint" style="margin:-4px 0 8px">${resumenDia}</div>`:''}` +
+    // Macros por columna de ESE día (pedido explícito: "por día" además de
+    // en Hoy) — mismo helper compartido, solo lo REALIZADO de ese día.
+    const macrosColsDia = metaDia ? `<div style="margin:2px 0 8px">${filaColumnasMacrosDia(fecha)}</div>` : '';
+    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>${resumenDia?`<div class="hint" style="margin:-4px 0 4px">${resumenDia}</div>`:''}${macrosColsDia}` +
       SLOTS.map(slot=>{
         // Un slot puede tener VARIAS entradas el mismo día — ej. Desayuno:
         // "Bistec en su jugo" + "Agua de horchata" — así que se listan
@@ -2560,19 +2682,23 @@ function renderCalendario(){
         let primero = true;
         const filasCalendario = entries.map((entry)=>{
           const nombre = entry.RecetaID ? (findReceta(entry.RecetaID)?findReceta(entry.RecetaID).Nombre:'(receta eliminada)') : entry.TextoLibre;
-          const fila = `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
+          const fila = `<div class="slot-row ${esVerdadero(entry.Cocinado)?'cocinado':''}" data-arrastrable="calendario" data-id="${entry.ID}" data-fecha="${fecha}" data-slot="${slot}" onclick="abrirAccionesSlot('${entry.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${esVerdadero(entry.Cocinado)?'✅ ':''}${escAttr(nombre)}</span></div>`;
           primero = false; return fila;
         }).join('');
         const filasRegistros = regs.map((r)=>{
           const hecho = esVerdadero(r.Realizado) || cocinadoPorReg[r.ID];
-          const fila = `<div class="slot-row" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${hecho?'✅':'🕓'} 🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
+          const fila = `<div class="slot-row" data-arrastrable="registro" data-id="${r.ID}" data-fecha="${fecha}" data-slot="${slot}" onclick="abrirAccionesComidaRegistrada('${r.ID}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido">${hecho?'✅':'🕓'} 🔥 ${escAttr(r.Descripcion||'Comida')} · ${Math.round(r.Energia||0)} kcal${fmtHora(r.Hora)?' · '+fmtHora(r.Hora):''}</span></div>`;
           primero = false; return fila;
         }).join('');
         const hayAlgo = entries.length + regs.length > 0;
         const filaAgregar = `<div class="slot-row vacio" onclick="abrirRegistrarComidaModal('${fecha}','${slot}')"><span class="slot-nombre">${primero?etiquetaSlot:''}</span><span class="slot-contenido hint">${hayAlgo?'+ Agregar otra':'+ Agregar'}</span></div>`;
-        return filasCalendario + filasRegistros + filaAgregar;
+        // Envuelve el grupo del slot en un solo drop-target (fecha+slot) —
+        // así arrastrar una comida hasta acá cambia AMBOS a la vez si hace
+        // falta (mover de día, de slot, o los dos juntos).
+        return `<div class="slot-drop-target" data-fecha="${fecha}" data-slot="${slot}">${filasCalendario}${filasRegistros}${filaAgregar}</div>`;
       }).join('') + `</div>`;
   }).join('');
+  activarArrastreComidasEn(document.getElementById('calendarioLista'));
 }
 function abrirAccionesComidaRegistrada(id){
   const r = DATA.nutricion_log.find(x=>x.ID===id); if(!r) return;
@@ -2781,6 +2907,29 @@ function macrosRealizadosParaFecha(fecha){
   campos.forEach(c=>{ out[c] = filas.reduce((s,r)=>s+(Number(r[c])||0),0); });
   return out;
 }
+// Fila horizontal de Sal/Grasas/Carbohidratos/Proteína "por columna" (no en
+// lista vertical, pedido explícito) con cuánto llevas de cada una y qué % de
+// tu meta diaria representa — compartida entre Inicio (Hoy), la pestaña
+// Comidas (hoy) y cada día del Calendario semanal, para no repetir la lógica
+// tres veces.
+const MACRO_COLS_DIA = ['Sal','Grasas','Carbohidratos','Proteina'];
+const MACRO_COLS_DIA_LABEL = ['Sal','Grasas','Carbs','Prot'];
+function encabezadoColumnasMacrosDia(){
+  return `<div class="hint" style="display:flex;gap:6px;margin-bottom:2px;font-size:11px"><div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${MACRO_COLS_DIA_LABEL.map(l=>`<span>${l}</span>`).join('')}</div></div>`;
+}
+function filaColumnasMacrosDia(fecha){
+  const metaDia = Number(usuarioActivo.MetaCalorias)||0;
+  const metas = metasMacrosDiarias(metaDia);
+  if(!metas) return '';
+  const macros = macrosRealizadosParaFecha(fecha);
+  return `<div style="display:flex;gap:6px"><div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${MACRO_COLS_DIA.map(c=>{
+    const val = macros[c]||0;
+    const meta = metas[c]||0;
+    const pct = meta ? Math.round((val/meta)*100) : null;
+    const color = pct===null ? 'var(--text-soft)' : (pct>100?'var(--danger)':'var(--success)');
+    return `<span style="display:flex;flex-direction:column;line-height:1.25"><b style="font-size:13px">${red1(val)}g</b>${pct!==null?`<span style="font-size:10px;color:${color}">${pct}%</span>`:''}</span>`;
+  }).join('')}</div></div>`;
+}
 let mostrarMacrosDashboard = false;
 function toggleMacrosDashboard(){ mostrarMacrosDashboard = !mostrarMacrosDashboard; renderNutriDashboard(); }
 let mostrarMacrosInicio = false;
@@ -2816,6 +2965,7 @@ function renderNutriDashboard(){
     </div>
     ${quemado?`<p class="hint" style="margin-top:4px">🏃 +${Math.round(quemado)} kcal de ejercicio ya sumadas a "Te quedan"</p>`:''}
     ${meta?'':'<p class="hint" style="margin-top:8px">Pon tu meta diaria de calorías para empezar — lo que vayas registrando aparece abajo, por día y por Desayuno/Comida/Cena/Snack.</p>'}
+    ${meta?`<div style="margin-top:10px">${encabezadoColumnasMacrosDia()}${filaColumnasMacrosDia(hoyLocalISO())}</div>`:''}
     ${meta?`<button class="btn ghost" style="margin-top:8px;font-size:13px;padding:6px 10px" onclick="toggleMacrosDashboard()">${mostrarMacrosDashboard?'▴ Ocultar detalle de macros':'▾ Ver detalle de macros (grasas, carbos, fibra…)'}</button>`:''}
     ${mostrarMacrosDashboard?`<div style="margin-top:8px">${filasMacros}</div>`:''}
   `;
