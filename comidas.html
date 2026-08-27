@@ -203,6 +203,12 @@ nav.tabbar button .ic{font-size:18px}
       <div class="card"><div class="body" id="inicioCalorias"></div></div>
       <div id="inicioComidasHoy"></div>
       <div class="card"><div class="body" id="inicioActividadHoy"></div></div>
+      <div class="card"><div class="body">
+        <h3>📝 Notas</h3>
+        <p class="hint">Recordatorios rápidos, ej. "divide tus 1300 kcal en 3 comidas de 400 y un snack de 100".</p>
+        <textarea id="notasComidaInput" rows="3" oninput="onNotasComidaInput()" placeholder="Tus notas aquí…"></textarea>
+        <div class="hint" id="notasComidaEstado" style="margin-top:4px"></div>
+      </div></div>
       <div style="margin:14px 0">
         <button class="btn ghost block" onclick="abrirPanelSugerenciaComidaIA('inicioSugerencia')">💡 Sugerencias de comida (IA)</button>
         <div id="inicioSugerencia"></div>
@@ -218,12 +224,6 @@ nav.tabbar button .ic{font-size:18px}
     <div id="screen-comidas" class="screen">
       <h2>🍽️ Comidas</h2>
       <div class="card"><div class="body" id="nutriDashboard"></div></div>
-      <div class="card"><div class="body">
-        <h3>📝 Notas</h3>
-        <p class="hint">Recordatorios rápidos, ej. "divide tus 1300 kcal en 3 comidas de 400 y un snack de 100".</p>
-        <textarea id="notasComidaInput" rows="3" oninput="onNotasComidaInput()" placeholder="Tus notas aquí…"></textarea>
-        <div class="hint" id="notasComidaEstado" style="margin-top:4px"></div>
-      </div></div>
       <details class="card">
         <summary style="padding:14px;cursor:pointer;font-weight:600">ℹ️ ¿Cómo se calculan estas metas?</summary>
         <div class="body" style="padding-top:0">
@@ -245,7 +245,6 @@ nav.tabbar button .ic{font-size:18px}
         <button class="btn ghost" style="flex:1" onclick="abrirPreferenciasComida()">🧭 Preferencias</button>
       </div>
       <button class="btn ghost block" style="margin-bottom:14px" onclick="abrirInformesModal()">📊 Informes</button>
-      <div class="card"><div class="body" id="comidaActividadHoy"></div></div>
       <div id="nutriSugerencia"></div>
       <div id="calendarioLista"></div>
     </div>
@@ -365,7 +364,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Uxmal';
+const BUILD_VERSION = 'Chichen';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -725,8 +724,6 @@ function renderAllScreens(){
 }
 function renderComidas(){
   renderNutriDashboard();
-  renderNotasComida();
-  renderActividadHoy('comidaActividadHoy');
   renderCalendario();
 }
 function switchTab(name){
@@ -1166,6 +1163,7 @@ function purgarPapeleraAntigua(){
 function renderInicio(){
   if(!usuarioActivo) return;
   renderInicioHoy();
+  renderNotasComida();
   const cad = document.getElementById('inicioCaducar');
   if(!gastosSesion){
     cad.innerHTML = `<div class="grupo-titulo">⏰ Por caducar pronto</div><p class="hint">Vincula tu sesión de Gastos en ⚙️ Configuración para ver esto.</p>`;
@@ -1239,7 +1237,7 @@ function renderInicioHoy(){
   // Sal/Grasas/Carbohidratos/Proteína, y cada comida adentro repite esas
   // mismas 4 columnas debajo de su nombre. Los encabezados de columna se
   // muestran UNA sola vez arriba de todas las tarjetas.
-  const colsHtml = (vals)=>`<div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${vals.map(v=>`<span>${v}</span>`).join('')}</div>`;
+  const colsHtml = (vals)=>`<div style="flex:1;display:grid;grid-template-columns:repeat(${MACRO_COLS_DIA.length},1fr);text-align:center">${vals.map(v=>`<span>${v}</span>`).join('')}</div>`;
   // Encabezado y fila de totales del día comparten el helper con la pestaña
   // Comidas y el Calendario (evita mantener el mismo % en tres lugares) — se
   // les agrega el espaciador de 52px para alinear con la columna del ▾/▴.
@@ -2657,7 +2655,13 @@ function renderCalendario(){
     // Macros por columna de ESE día (pedido explícito: "por día" además de
     // en Hoy) — mismo helper compartido, solo lo REALIZADO de ese día.
     const macrosColsDia = metaDia ? `<div style="margin:2px 0 8px">${filaColumnasMacrosDia(fecha)}</div>` : '';
-    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>${resumenDia?`<div class="hint" style="margin:-4px 0 4px">${resumenDia}</div>`:''}${macrosColsDia}` +
+    // El widget de agua (+/−) solo vive en "Actividad de hoy" (Inicio) —
+    // pedido explícito de no duplicarlo acá — pero cada día del Calendario
+    // sí muestra cuánta agua quedó registrada ESE día, de solo lectura.
+    const aguaRowDia = DATA.agua_log.find(r=>r.Usuario===usuarioActivo.ID && r.Fecha===fecha && !esVerdadero(r.Papelera));
+    const vasosDia = aguaRowDia ? (Number(aguaRowDia.Vasos)||0) : 0;
+    const aguaDia = vasosDia ? `<div class="hint" style="margin:-2px 0 4px">💧 ${vasosDia} vaso${vasosDia===1?'':'s'} de agua</div>` : '';
+    return `<div class="dia-col"><div class="dia-header">${etiqueta.charAt(0).toUpperCase()+etiqueta.slice(1)}</div>${resumenDia?`<div class="hint" style="margin:-4px 0 4px">${resumenDia}</div>`:''}${aguaDia}${macrosColsDia}` +
       SLOTS.map(slot=>{
         // Un slot puede tener VARIAS entradas el mismo día — ej. Desayuno:
         // "Bistec en su jugo" + "Agua de horchata" — así que se listan
@@ -2907,27 +2911,40 @@ function macrosRealizadosParaFecha(fecha){
   campos.forEach(c=>{ out[c] = filas.reduce((s,r)=>s+(Number(r[c])||0),0); });
   return out;
 }
-// Fila horizontal de Sal/Grasas/Carbohidratos/Proteína "por columna" (no en
-// lista vertical, pedido explícito) con cuánto llevas de cada una y qué % de
-// tu meta diaria representa — compartida entre Inicio (Hoy), la pestaña
-// Comidas (hoy) y cada día del Calendario semanal, para no repetir la lógica
-// tres veces.
-const MACRO_COLS_DIA = ['Sal','Grasas','Carbohidratos','Proteina'];
-const MACRO_COLS_DIA_LABEL = ['Sal','Grasas','Carbs','Prot'];
+// Fila horizontal de macros "por columna" (no en lista vertical, pedido
+// explícito) — compartida entre Inicio (Hoy), la pestaña Comidas (hoy) y
+// cada día del Calendario semanal, para no repetir la lógica tres veces.
+// Ronda 2026-08-28 (2do seguimiento): se agregaron Sat/Azúcar/Fibra (antes
+// solo Grasas/Carbs/Prot/Sal), y el % que se muestra ya NO es "cuánto llevo
+// del tope de mi meta" — ahora es "qué % de las kcal que YA comí hoy vienen
+// de este macro" (composición real de mi comida), con lo que "debería ser"
+// (según el reparto de metasMacrosDiarias) entre paréntesis en % y kcal.
+// Sal no tiene calorías (KCAL_POR_G_MACRO.Sal=0) así que un "% de mis kcal"
+// no tiene sentido para ella — se deja en gramos contra su tope, con el
+// tope entre paréntesis en vez de %/kcal.
+const MACRO_COLS_DIA = ['Grasas','GrasasSaturadas','Carbohidratos','Azucares','Fibra','Proteina','Sal'];
+const MACRO_COLS_DIA_LABEL = ['Grasas','Sat','Carbs','Azúcar','Fibra','Prot','Sal'];
+const KCAL_POR_G_MACRO = { Grasas:9, GrasasSaturadas:9, Carbohidratos:4, Azucares:4, Fibra:2, Proteina:4, Sal:0 };
 function encabezadoColumnasMacrosDia(){
-  return `<div class="hint" style="display:flex;gap:6px;margin-bottom:2px;font-size:11px"><div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${MACRO_COLS_DIA_LABEL.map(l=>`<span>${l}</span>`).join('')}</div></div>`;
+  return `<div class="hint" style="display:flex;gap:4px;margin-bottom:2px;font-size:10px"><div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);text-align:center">${MACRO_COLS_DIA_LABEL.map(l=>`<span>${l}</span>`).join('')}</div></div>`;
 }
 function filaColumnasMacrosDia(fecha){
   const metaDia = Number(usuarioActivo.MetaCalorias)||0;
   const metas = metasMacrosDiarias(metaDia);
   if(!metas) return '';
   const macros = macrosRealizadosParaFecha(fecha);
-  return `<div style="display:flex;gap:6px"><div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);text-align:center">${MACRO_COLS_DIA.map(c=>{
+  const totalKcal = macros.Energia||0;
+  return `<div style="display:flex;gap:4px"><div style="flex:1;display:grid;grid-template-columns:repeat(7,1fr);text-align:center">${MACRO_COLS_DIA.map(c=>{
     const val = macros[c]||0;
-    const meta = metas[c]||0;
-    const pct = meta ? Math.round((val/meta)*100) : null;
-    const color = pct===null ? 'var(--text-soft)' : (pct>100?'var(--danger)':'var(--success)');
-    return `<span style="display:flex;flex-direction:column;line-height:1.25"><b style="font-size:13px">${red1(val)}g</b>${pct!==null?`<span style="font-size:10px;color:${color}">${pct}%</span>`:''}</span>`;
+    const kcalFactor = KCAL_POR_G_MACRO[c];
+    const metaG = metas[c]||0;
+    if(!kcalFactor){
+      return `<span style="display:flex;flex-direction:column;line-height:1.2"><b style="font-size:12px">${red1(val)}g</b><span style="font-size:9px;color:var(--text-soft)">(${red1(metaG)}g)</span></span>`;
+    }
+    const miPct = totalKcal ? Math.round((val*kcalFactor)/totalKcal*100) : null;
+    const metaKcal = Math.round(metaG*kcalFactor);
+    const metaPct = metaDia ? Math.round((metaKcal/metaDia)*100) : null;
+    return `<span style="display:flex;flex-direction:column;line-height:1.2"><b style="font-size:12px">${miPct!==null?miPct+'%':'—'}</b><span style="font-size:9px;color:var(--text-soft)">(${metaPct!==null?metaPct+'%':'—'}·${metaKcal}kcal)</span></span>`;
   }).join('')}</div></div>`;
 }
 let mostrarMacrosDashboard = false;
@@ -3633,6 +3650,10 @@ function inicioSemana(d){
   return r;
 }
 function fmtFechaCorta(d){ const t = d.toLocaleDateString('es-MX',{day:'numeric',month:'short'}); return t.charAt(0).toUpperCase()+t.slice(1); }
+function mostrarKcalBarraInforme(slot, fecha, kcal){
+  const etiquetaFecha = fecha===hoyLocalISO() ? 'hoy' : fmtFechaCorta(new Date(fecha+'T00:00:00'));
+  showToast(`${SLOT_ICONOS[slot]||''} ${slot} (${etiquetaFecha}): ${kcal} kcal`);
+}
 function datosInformesSemana(lunes){
   const dias = [];
   for(let i=0;i<7;i++){ const d = new Date(lunes); d.setDate(lunes.getDate()+i); dias.push(fechaLocalISO(d)); }
@@ -3645,7 +3666,12 @@ function datosInformesSemana(lunes){
     return { fecha, porSlot, total };
   });
   const totalSemana = porDia.reduce((s,d)=>s+d.total,0);
-  return { dias: porDia, meta, totalSemana, promedio: totalSemana/7 };
+  // Promedio SOLO entre los días que de verdad tienen algo registrado — antes
+  // dividía siempre entre 7, así que una semana con solo 3 días cargados se
+  // veía con un promedio artificialmente bajo (pedido explícito: "que
+  // promedie solo donde hay datos").
+  const diasConDatos = porDia.filter(d=>d.total>0).length;
+  return { dias: porDia, meta, totalSemana, promedio: diasConDatos ? totalSemana/diasConDatos : 0 };
 }
 function svgInformesSemana(datos){
   const anchoTotal = 320, altoBarras = 140, margenSup = 20;
@@ -3663,7 +3689,10 @@ function svgInformesSemana(datos){
       if(!val) return;
       const alto = val*escala;
       yAcum -= alto;
-      barrasSvg += `<rect x="${x}" y="${yAcum.toFixed(1)}" width="${anchoBarra}" height="${alto.toFixed(1)}" fill="${SLOT_COLORES_INFORME[slot]}" rx="2"/>`;
+      // Tocar/tap un color del stack avisa cuántas kcal fueron ese momento
+      // ese día (pedido explícito) — <title> de regalo da tooltip nativo en
+      // desktop al pasar el mouse.
+      barrasSvg += `<rect x="${x}" y="${yAcum.toFixed(1)}" width="${anchoBarra}" height="${alto.toFixed(1)}" fill="${SLOT_COLORES_INFORME[slot]}" rx="2" style="cursor:pointer" onclick="mostrarKcalBarraInforme('${slot}','${d.fecha}',${Math.round(val)})"><title>${slot}: ${Math.round(val)} kcal</title></rect>`;
     });
     const nombreDia = fmtFechaCorta(new Date(d.fecha+'T00:00:00')).split(' ')[0].slice(0,2);
     const esHoy = d.fecha===hoyISO;
