@@ -369,7 +369,7 @@ nav.tabbar button .ic{font-size:18px}
 // ============================================================
 let GAS_URL = localStorage.getItem('comidas_gas_url') || '';
 let SHEET_URL = '';
-const BUILD_VERSION = 'Bonampak';
+const BUILD_VERSION = 'Edzna';
 let DATA = { usuarios:[], categorias:[], recetas:[], recetas_historial:[], inventario:[], precios:[], lista_compras:[], calendario:[], nutricion_log:[], config:[], restaurantes:[], ejercicio_log:[], cuerpo_log:[], agua_log:[] };
 let usuarioActivo = null; // {ID,Nombre}
 // Ingredientes y Lista de compras viven en el Sheet de Gastos, no en el de
@@ -1253,6 +1253,15 @@ function renderInicioHoy(){
   // mismas 4 columnas debajo de su nombre. Los encabezados de columna se
   // muestran UNA sola vez arriba de todas las tarjetas.
   const colsHtml = (vals)=>`<div style="flex:1;display:grid;grid-template-columns:repeat(${MACRO_COLS_DIA.length},1fr);text-align:center">${vals.map(v=>`<span>${v}</span>`).join('')}</div>`;
+  // Pedido explícito: abajo (subtotal de la tarjeta y cada comida) también
+  // se ve el kcal que ese tanto de gramos representa, no solo el gramaje —
+  // mismo factor kcal/g que ya usa la fila de arriba (KCAL_POR_G_MACRO).
+  const celdaGramoKcal = (campo, gramos)=>{
+    const g = red1(gramos);
+    const kcalFactor = KCAL_POR_G_MACRO[campo];
+    if(!kcalFactor) return `<span style="display:flex;flex-direction:column;line-height:1.15"><b>${g}g</b></span>`;
+    return `<span style="display:flex;flex-direction:column;line-height:1.15"><b>${g}g</b><span style="font-size:9px;color:var(--text-soft)">${Math.round(gramos*kcalFactor)}kcal</span></span>`;
+  };
   // Encabezado y fila de totales del día comparten el helper con la pestaña
   // Comidas y el Calendario (evita mantener el mismo % en tres lugares) — se
   // les agrega el espaciador de 52px para alinear con la columna del ▾/▴.
@@ -1284,10 +1293,10 @@ function renderInicioHoy(){
     }).join('');
     const filasRegistros = regsSlot.map(r=>{
       const hecho = esVerdadero(r.Realizado) || cocinadoPorReg[r.ID];
-      const macros = MACRO_COLS_DIA.map(c=>red1(r[c]));
+      const macros = MACRO_COLS_DIA.map(c=>celdaGramoKcal(c, Number(r[c])||0));
       return `<div class="slot-row" style="margin:0 0 6px;flex-direction:column;align-items:stretch;gap:2px" data-arrastrable="registro" data-id="${r.ID}" data-fecha="${hoyISO}" data-slot="${slot}" onclick="abrirAccionesComidaRegistrada('${r.ID}')">
         <div style="display:flex;justify-content:space-between;gap:8px"><span>${hecho?'✅':'🕓'} ${escAttr(r.Descripcion||'Comida')}</span><b>${Math.round(r.Energia||0)}</b></div>
-        <div style="display:flex;gap:6px;color:var(--text-soft);font-size:12px">${colsHtml(macros)}<div style="width:52px"></div></div>
+        <div style="display:flex;gap:6px;color:var(--text-soft);font-size:11px">${colsHtml(macros)}<div style="width:52px"></div></div>
       </div>`;
     }).join('');
     const filaAgregar = `<div class="slot-row vacio" style="margin:0" onclick="abrirRegistrarComidaModal('${hoyISO}','${slot}')"><span class="slot-contenido hint">+ Agregar otra</span></div>`;
@@ -1297,7 +1306,7 @@ function renderInicioHoy(){
         <div style="font-weight:700;color:var(--success)">${Math.round(totalKcalSlot)}</div>
       </div>
       <div style="display:flex;gap:6px;padding:0 10px 8px;color:var(--text-soft);font-size:12px;cursor:pointer" onclick="toggleInicioSlot('${slot}')">
-        ${colsHtml(totalesSlot.map(v=>red1(v)))}
+        ${colsHtml(MACRO_COLS_DIA.map((c,i)=>celdaGramoKcal(c, totalesSlot[i])))}
         <div style="width:52px;text-align:right">${abierto?'▴':'▾'}</div>
       </div>
       ${abierto?`<div style="padding:0 0 12px">${filasCalendario}${filasRegistros}${filaAgregar}</div>`:''}
